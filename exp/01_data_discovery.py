@@ -14,7 +14,6 @@
 # ---
 
 # %%
-from matplotlib import markers
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -36,6 +35,9 @@ df.info()
 
 # %%
 df.head()
+
+# %%
+df.describe().loc['min']
 
 # %%
 greek_df = pd.read_csv('../data/greeks.csv')
@@ -66,7 +68,7 @@ plt.pcolormesh(missing_mask)
 # ## Class Distribution
 
 # %%
-sns.histplot(df, x='Class', hue='Class')
+sns.countplot(df, x='Class', hue='Class')
 
 # %% [markdown]
 # We have unbalanced dataset here,
@@ -85,7 +87,7 @@ def plot_feature_distribution(df: pd.DataFrame):
     for col, ax in zip(feature_columns, axes.flatten()):
         # If we approach the categorical column, ignore it.
         if col != 'EJ':
-            sns.kdeplot(df, x=col, hue='Class', ax=ax)
+            sns.kdeplot(df, x=col, hue='Class', ax=ax, log_scale=True)
         else:
             ax.remove()
 
@@ -124,7 +126,7 @@ def plot_feature_distribution_with_alpha(df: pd.DataFrame):
     for col, ax in zip(feature_columns, axes.flatten()):
         # If we approach the categorical column, ignore it.
         if col != 'EJ':
-            sns.kdeplot(df, x=col, hue='Alpha', ax=ax)
+            sns.kdeplot(df, x=col, hue='Alpha', ax=ax, log_scale=True)
         else:
             ax.remove()
 
