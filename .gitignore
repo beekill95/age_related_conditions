@@ -163,5 +163,8 @@ cython_debug/
 data/
 *.zip
 
+# Catboost's stuffs.
+**/*/catboost_info
+
 # No .ipynb please!
 *.ipynb
