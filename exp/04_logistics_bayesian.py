@@ -17,13 +17,17 @@
 from jax import random
 from jax.scipy.special import expit
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 from numpyro.infer import MCMC, NUTS, Predictive
 import numpyro.distributions as dist
 import pandas as pd
 from sklearn.impute import SimpleImputer
+from sklearn.metrics import f1_score, recall_score, precision_score
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
+numpyro.set_host_device_count(4)
 
 # %%
 kaggle_submission = False
@@ -53,6 +57,7 @@ test_df.info()
 # %%
 preprocessing = Pipeline([
     ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler()),
 ])
 
 # %%
@@ -72,9 +77,9 @@ def logistic_regression_model(*, X: jnp.ndarray, group: jnp.ndarray, nb_groups: 
     assert nb_obs == group.shape[0]
 
     # Scale the metric features to zero mean and one standard deviation.
-    mean_X = jnp.mean(X, axis=0)
-    std_X = jnp.std(X, axis=0)
-    z_X = (X - mean_X) / std_X
+    # mean_X = jnp.mean(X, axis=0)
+    # std_X = jnp.std(X, axis=0)
+    # z_X = (X - mean_X) / std_X
 
     # Prior for baselines.
     a0 = numpyro.sample('_a0', dist.Normal(0., 1.))
@@ -87,7 +92,7 @@ def logistic_regression_model(*, X: jnp.ndarray, group: jnp.ndarray, nb_groups: 
 
     # Observations.
     with numpyro.plate('obs', nb_obs) as idx:
-        logit = numpyro.deterministic('logit', a0 + jnp.dot(z_X[idx], a) + aG[group[idx]])
+        logit = numpyro.deterministic('logit', a0 + jnp.dot(X[idx], a) + aG[group[idx]])
         if y is not None:
             numpyro.sample('y', dist.BernoulliLogits(logit), obs=y[idx])
         else:
@@ -95,7 +100,7 @@ def logistic_regression_model(*, X: jnp.ndarray, group: jnp.ndarray, nb_groups: 
 
 
 kernel = NUTS(logistic_regression_model)
-mcmc = MCMC(kernel, num_warmup=1000, num_samples=5000)
+mcmc = MCMC(kernel, num_warmup=1000, num_samples=20000, num_chains=4)
 mcmc.run(
     random.PRNGKey(0),
     X=jnp.array(X),
@@ -119,5 +124,42 @@ predictions = predictive(
 
 # %%
 y_probs = expit(predictions['logit'])
-y_probs
+y_prob = jnp.median(y_probs, axis=0)
+y_pred = np.asarray(jnp.where(y_prob > 0.5, 1, 0))
 
+# Compute the scores.
+f1 = f1_score(y, y_pred)
+recall = recall_score(y, y_pred)
+precision = precision_score(y, y_pred)
+print(f'{f1=}, {recall=}, {precision=}')
+
+# %% [markdown]
+# ## Submission
+
+# %%
+# Preprocess test data.
+X_test = test_df.drop(columns=['Id', 'EJ'])
+ej_test = test_df['EJ'].astype(ej.dtype)
+
+X_test = preprocessing.transform(X_test)
+
+# %%
+# Make predictions.
+predictions = predictive(
+    random.PRNGKey(1),
+    X=jnp.array(X_test),
+    nb_groups=ej.cat.categories.size,
+    group=jnp.array(ej_test.cat.codes.values)
+)
+
+y_probs = expit(predictions['logit'])
+y_prob = np.asarray(jnp.median(y_probs, axis=0))
+
+# %%
+# Create .csv submission file.
+submission = pd.DataFrame({
+    'Id': test_df['Id'],
+    'class_0': 1. - y_prob,
+    'class_1': y_prob,
+})
+submission.to_csv('submission.csv', index=False)
