@@ -21,7 +21,8 @@ import pandas as pd
 import seaborn as sns
 from sklearn.ensemble import (RandomForestClassifier,
                               HistGradientBoostingClassifier,
-                              AdaBoostClassifier)
+                              AdaBoostClassifier,
+                              VotingClassifier)
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC, SVC
 from sklearn.gaussian_process import GaussianProcessClassifier
@@ -33,29 +34,41 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
+# %% tags=["parameters"]
+kaggle_submission = False
+
 # %% [markdown]
 # # Multiple Baseline Comparison
 # ## Data
 
 # %%
-df = pd.read_csv('../data/train.csv')
-df.info()
+if kaggle_submission:
+    train_path = '/kaggle/input/icr-identify-age-related-conditions/train.csv'
+    test_path = '/kaggle/input/icr-identify-age-related-conditions/test.csv'
+else:
+    train_path = '../data/train.csv'
+    test_path = '../data/test.csv'
+
+train_df = pd.read_csv(train_path)
+train_df.info()
+
+# %%
+test_df = pd.read_csv(test_path)
+test_df.info()
 
 # %%
 # Split data into features and target.
-X = df.drop(columns=['Id', 'Class'])
-y = df['Class']
+X = train_df.drop(columns=['Id', 'Class'])
+X_test = test_df.drop(columns=['Id'])
+y = train_df['Class']
 
 # %%
 # Preprocess categorical column 'EJ' into 0-1 encoding.
 ej_onehot = pd.get_dummies(X['EJ'])
 X = X.drop(columns='EJ').join(ej_onehot)
 
-# %%
-# Replace missing values with median.
-# medians = X.median()
-# X = X.fillna(medians)
-
+ej_onehot = pd.get_dummies(X_test['EJ'])
+X_test = X_test.drop(columns='EJ').join(ej_onehot)
 
 # %% [markdown]
 # ## Models
@@ -127,9 +140,9 @@ for model_name, model in models:
     test_f1_mean = r['f1'][r['Data'] == 'Test'].mean()
     test_f1_std = r['f1'][r['Data'] == 'Test'].std()
 
-    print(f'{model_name:>15} \
-          | f1_test: {test_f1_mean:.4f} ± {test_f1_std:.4f} \
-          | f1_train: {train_f1_mean:.4f} ± {train_f1_std:.4f}')
+    print(f'{model_name:>15}',
+          f'| f1_test: {test_f1_mean:.4f} ± {test_f1_std:.4f}',
+          f'| f1_train: {train_f1_mean:.4f} ± {train_f1_std:.4f}')
 
 # %%
 # This time, with standard scaler.
@@ -145,6 +158,54 @@ for model_name, model in models:
     test_f1_mean = r['f1'][r['Data'] == 'Test'].mean()
     test_f1_std = r['f1'][r['Data'] == 'Test'].std()
 
-    print(f'{model_name:>15} \
-          | f1_test: {test_f1_mean:.4f} ± {test_f1_std:.4f} \
-          | f1_train: {train_f1_mean:.4f} ± {train_f1_std:.4f}')
+    print(f'{model_name:>15}',
+          f'| f1_test: {test_f1_mean:.4f} ± {test_f1_std:.4f}',
+          f'| f1_train: {train_f1_mean:.4f} ± {train_f1_std:.4f}')
+
+# %% [markdown]
+#
+# With standard scaler, 
+# the models are able to perform a lot better,
+# at least for the basic models
+# (logistic regression, KNN, gaussian classifier, etc.).
+# However, for the boosting models,
+# scaling doesn't change or improve anything.
+
+# %% [markdown]
+# ## Submission
+#
+# For submisssion,
+# we will train all the boosting models on all training data.
+
+# %%
+best_models = [
+    ('adaboost', AdaBoostClassifier()),
+    ('histboost', HistGradientBoostingClassifier()),
+    ('lgbm', LGBMClassifier()),
+    ('lgbm balanced', LGBMClassifier(class_weight='balanced')),
+    ('dart', LGBMClassifier(boosting_type='dart')),
+    ('dart balanced', LGBMClassifier(boosting_type='dart', class_weight='balanced')),
+    ('xgboost', XGBClassifier()),
+    ('catboost', CatBoostClassifier(verbose=0)),
+    ('cb balanced', CatBoostClassifier(verbose=0, auto_class_weights='Balanced')),
+]
+model = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaling', StandardScaler()),
+    ('voting', VotingClassifier(estimators=best_models, voting='soft'))
+])
+
+# Fit the model on train data.
+model = model.fit(X, y)
+
+# %%
+# Perform the prediction on test data.
+y_pred = model.predict_proba(X_test)
+
+# Save submission file.
+submission = pd.DataFrame({
+    'Id': test_df['Id'],
+    'class_0': y_pred[:, 0],
+    'class_1': y_pred[:, 1],
+})
+submission.to_csv('submission.csv', index=False)
