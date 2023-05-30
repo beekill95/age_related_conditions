@@ -19,6 +19,7 @@ from lightgbm import LGBMClassifier
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (RandomForestClassifier,
                               HistGradientBoostingClassifier,
                               AdaBoostClassifier,
@@ -30,7 +31,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import cross_validate
 from sklearn.impute import SimpleImputer 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
@@ -64,11 +65,11 @@ y = train_df['Class']
 
 # %%
 # Preprocess categorical column 'EJ' into 0-1 encoding.
-ej_onehot = pd.get_dummies(X['EJ'])
-X = X.drop(columns='EJ').join(ej_onehot)
+# ej_onehot = pd.get_dummies(X['EJ'])
+# X = X.drop(columns='EJ').join(ej_onehot)
 
-ej_onehot = pd.get_dummies(X_test['EJ'])
-X_test = X_test.drop(columns='EJ').join(ej_onehot)
+# ej_onehot = pd.get_dummies(X_test['EJ'])
+# X_test = X_test.drop(columns='EJ').join(ej_onehot)
 
 # %% [markdown]
 # ## Models
@@ -131,8 +132,12 @@ def cross_validate_model(model, *, X, y, cv: int):
 
 for model_name, model in models:
     r = cross_validate_model(
-            Pipeline([('imputer', SimpleImputer(strategy='median')),
-                      (model_name, model)]),
+            Pipeline([
+                ('column', ColumnTransformer([
+                    ('onehot', OneHotEncoder(), ['EJ']),
+                ], remainder='passthrough')),
+                ('imputer', SimpleImputer(strategy='median')),
+                (model_name, model)]),
             X=X, y=y, cv=10)
 
     train_f1_mean = r['f1'][r['Data'] == 'Train'].mean()
@@ -148,9 +153,13 @@ for model_name, model in models:
 # This time, with standard scaler.
 for model_name, model in models:
     r = cross_validate_model(
-            Pipeline([('imputer', SimpleImputer(strategy='median')),
-                      ('scaler', StandardScaler()),
-                      (model_name, model)]),
+            Pipeline([
+                ('column', ColumnTransformer([
+                    ('onehot', OneHotEncoder(), ['EJ']),
+                ], remainder='passthrough')),
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', StandardScaler()),
+                (model_name, model)]),
             X=X, y=y, cv=10)
 
     train_f1_mean = r['f1'][r['Data'] == 'Train'].mean()
@@ -190,6 +199,9 @@ best_models = [
     ('cb balanced', CatBoostClassifier(verbose=0, auto_class_weights='Balanced')),
 ]
 model = Pipeline([
+    ('column', ColumnTransformer([
+        ('onehot', OneHotEncoder(), ['EJ']),
+    ], remainder='passthrough')),
     ('imputer', SimpleImputer(strategy='median')),
     ('scaling', StandardScaler()),
     ('voting', VotingClassifier(estimators=best_models, voting='soft'))
