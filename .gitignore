@@ -168,3 +168,4 @@ data/
 
 # No .ipynb please!
 *.ipynb
+submission.csv
