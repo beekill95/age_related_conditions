@@ -111,7 +111,7 @@ def robust_logistic_regression(*,
 
 
 kernel = NUTS(robust_logistic_regression, init_strategy=init_to_median)
-mcmc = MCMC(kernel, num_warmup=1000, num_samples=5000, num_chains=4)
+mcmc = MCMC(kernel, num_warmup=1000, num_samples=1000, num_chains=4)
 mcmc.run(
     random.PRNGKey(0),
     X=jnp.array(X),
@@ -143,6 +143,19 @@ f1 = f1_score(y, y_pred)
 recall = recall_score(y, y_pred)
 precision = precision_score(y, y_pred)
 print(f'{f1=}, {recall=}, {precision=}')
+
+# %%
+def balanced_log_loss(y_true, y_pred_prob):
+    assert y_true.shape == y_pred_prob.shape
+    nb_class_1 = np.sum(y_true)
+    nb_class_0 = len(y_true) - nb_class_1
+
+    prob = np.clip(y_pred_prob, 1e-15, 1. - 1e-15)
+    return (-np.sum((1 - y_true) * np.log(1. - prob + 1e-15)) / nb_class_0 -
+            np.sum(y_true * np.log(prob)) / nb_class_1) / 2.
+
+
+balanced_log_loss(y, y_prob)
 
 # %% [markdown]
 # ## Submission
