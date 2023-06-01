@@ -205,7 +205,7 @@ results = jax_minimize(
 print(f'{results.success=}, {results.fun=}, {results.status=}')
 
 # Optimimal y_prob.
-y_prob_optim = results.x
+y_prob_optim = expit(results.x)
 
 # %%
 # Create .csv submission file.
