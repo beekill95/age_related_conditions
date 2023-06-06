@@ -31,7 +31,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-numpyro.set_host_device_count(4)
+numpyro.set_host_device_count(2)
 
 # %%
 kaggle_submission = False
@@ -172,7 +172,7 @@ def robust_logistic_regression_with_interactions(
 
 kernel = NUTS(robust_logistic_regression_with_interactions,
               init_strategy=init_to_median)
-mcmc = MCMC(kernel, num_warmup=1000, num_samples=5000, num_chains=4)
+mcmc = MCMC(kernel, num_warmup=1000, num_samples=10000, num_chains=2)
 mcmc.run(
     random.PRNGKey(0),
     X=jnp.array(X_df.values),
@@ -225,15 +225,47 @@ def balanced_log_loss_jax(y_true):
     return log_loss_jax
 
 
-results = jax_minimize(
-        balanced_log_loss_jax(predictions['y']),
-        logit(y_prob),
-        method='BFGS',
-        options=dict(maxiter=10000))
+def calculate_best_prob_prediction(y_preds: np.ndarray):
+    """
+    Calculate the best probability prediction based on the above formula.
+
+    y_preds: numpy array of shape (nb_draws, nb_data_points).
+    """
+    assert y_preds.ndim == 2, "Only accept 2d numpy array as input."
+    _, nb_data = y_preds.shape
+    print(y_preds.shape)
+
+    # Calculate number of classes for each draw.
+    nb_class_0 = np.sum(1 - y_preds, axis=1)
+    print(nb_class_0.shape)
+    nb_class_1 = np.sum(y_preds, axis=1)
+
+    best_probs = []
+    eps = 1e-15
+    for j in range(nb_data):
+        cj = np.sum(y_preds[:, j] / (nb_class_1 + eps))
+        cj_1 = np.sum((1 - y_preds[:, j]) / (nb_class_0 + eps))
+
+        prob = cj / (cj + cj_1)
+        best_probs.append(prob)
+
+    return np.asarray(best_probs)
+
+
+# Using our own derivation.
+best_probs = calculate_best_prob_prediction(predictions['y'])
+our_log_loss = balanced_log_loss_jax(predictions['y'])(logit(best_probs))
+print(f'{our_log_loss=}')
+
+# results = jax_minimize(
+#         balanced_log_loss_jax(predictions['y']),
+#         logit(y_prob),
+#         method='BFGS',
+#         options=dict(maxiter=10000))
 
 
 # %%
-print(f'{results.success=}, {results.fun=}, {results.status=}')
+# print(f'{results.success=}, {results.fun=}, {results.status=}')
 
 # %% [markdown]
 # ## Submission
@@ -271,15 +303,18 @@ predictions = predictive(
 # such that it minimizes the balanced log loss.
 # y_probs = predictions['prob']
 # y_prob = np.asarray(jnp.median(y_probs, axis=0))
-results = jax_minimize(
-        balanced_log_loss_jax(predictions['y']),
-        logit(jnp.median(predictions['prob'], axis=0)),
-        method='BFGS',
-        options=dict(maxiter=100000))
-print(f'{results.success=}, {results.fun=}, {results.status=}')
+# results = jax_minimize(
+#         balanced_log_loss_jax(predictions['y']),
+#         logit(jnp.median(predictions['prob'], axis=0)),
+#         method='BFGS',
+#         options=dict(maxiter=100000))
+# print(f'{results.success=}, {results.fun=}, {results.status=}')
 
 # Optimimal y_prob.
-y_prob_optim = expit(results.x)
+# y_prob_optim = expit(results.x)
+y_prob_optim = calculate_best_prob_prediction(predictions['y'])
+our_log_loss = balanced_log_loss_jax(predictions['y'])(logit(y_prob_optim))
+print(f'{our_log_loss=}')
 
 # %%
 # Create .csv submission file.
