@@ -26,6 +26,7 @@ jupyterlab = "^4.0.0"
 jupytext = "^1.14.5"
 kaggle = "^1.5.13"
 ipywidgets = "^8.0.6"
+itables = "^1.5.2"
 
 [build-system]
 requires = ["poetry-core"]
