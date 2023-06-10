@@ -34,7 +34,7 @@ init_notebook_mode(all_interactive=True)
 # ## Data Processing
 #
 # We'll apply data visualization for interaction and quadratic
-# terms for important features as found in the previous notebooks.
+# terms for __all__ features as found in the previous notebooks.
 # Furthermore,
 # unlike the previous notebooks,
 # the preprocessing steps are different:
@@ -72,10 +72,8 @@ def create_interaction_terms_between(df: pd.DataFrame, features: list[str]) -> p
 # Fill missing values with medians.
 X_df = X_df.fillna(X_df.median())
 
-# Select features based on previous notebooks.
-most_important_features = ['BQ', 'CR', 'DI', 'DU']
-less_important_features = ['CD ', 'CH', 'DN', 'DL', 'EE', 'EP', 'FI', 'GE', 'GF']
-features = most_important_features + less_important_features
+# We use all features.
+features = X_df.columns
 
 # Interaction features.
 X_interactions_df = create_interaction_terms_between(X_df, features)
@@ -121,3 +119,5 @@ sns.swarmplot(x=X_reduced[:, 0], y=y_df, hue=greek_df['Alpha'], orient='h')
 # both classes tend to cluster at the extreme ends of the first feature.
 # However, this is not perfect,
 # the majority class looks like a uniform distribution.
+#
+# => We need to do a better job!
