@@ -20,6 +20,9 @@ xgboost = "^1.7.5"
 lightgbm = "^3.3.5"
 catboost = "^1.2"
 arviz = "^0.15.1"
+torch = "^2.0.1"
+torchvision = "^0.15.2"
+torchaudio = "^2.0.2"
 
 [tool.poetry.group.dev.dependencies]
 jupyterlab = "^4.0.0"
