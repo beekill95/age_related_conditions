@@ -47,6 +47,7 @@ init_notebook_mode(all_interactive=True)
 train_df = pd.read_csv('../data/train.csv')
 greek_df = pd.read_csv('../data/greeks.csv')
 X_df = train_df.drop(columns=['Id', 'Class', 'EJ'])
+ej_df = train_df['EJ']
 y_df = train_df['Class']
 
 # %%
@@ -89,6 +90,9 @@ all_df = pd.DataFrame(
     columns=all_df.columns,
     index=all_df.index)
 all_df.describe().transpose()
+
+# %%
+all_df = pd.concat([all_df, pd.get_dummies(ej_df)], axis=1)
 
 # %% [markdown]
 # ## Feature Visualization

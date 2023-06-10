@@ -92,6 +92,10 @@ all_df = pd.DataFrame(
     index=all_df.index)
 all_df.describe().transpose()
 
+# %%
+ej_df = train_df['EJ']
+all_df = pd.concat([all_df, pd.get_dummies(ej_df)], axis=1)
+
 # %% [markdown]
 # ## Feature Visualization
 
