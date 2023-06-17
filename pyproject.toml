@@ -22,6 +22,8 @@ catboost = "^1.2"
 arviz = "^0.15.1"
 funsor = "^0.4.5"
 torch = {version = "^2.0.1+cpu", source = "torch-cpu"}
+torchvision = {version = "^0.15.2+cpu", source = "torch-cpu"}
+torchaudio = {version = "^2.0.2+cpu", source = "torch-cpu"}
 
 [tool.poetry.group.dev.dependencies]
 jupyterlab = "^4.0.0"
