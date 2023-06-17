@@ -720,6 +720,31 @@ files = [
 ]
 
 [[package]]
+name = "funsor"
+version = "0.4.5"
+description = "A tensor-like library for functions and distributions"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "funsor-0.4.5-py3-none-any.whl", hash = "sha256:b99a2b5ddb26a93b5e9d28b82dbc8f36efc686c37da2f71086bfa5bc7f45726d"},
+    {file = "funsor-0.4.5.tar.gz", hash = "sha256:08b77e5de04d7cf5213b4013a08a2e756ab52572a48bef6774a0c70664d4fe31"},
+]
+
+[package.dependencies]
+makefun = "*"
+multipledispatch = "*"
+numpy = ">=1.7"
+opt-einsum = ">=2.3.2"
+typing-extensions = "*"
+
+[package.extras]
+dev = ["black", "flake8", "isort (>=5.0)", "nbsphinx", "pandas", "pillow (==8.2.0)", "pytest (==4.3.1)", "pytest-xdist (==1.27.0)", "scipy", "sphinx (>=2.0)", "sphinx-gallery", "sphinx-rtd-theme", "torchvision (>=0.12.0)"]
+jax = ["jax (>=0.2.21)", "jaxlib (>=0.1.71)", "numpyro (>=0.7.0)"]
+test = ["black", "flake8", "isort (>=5.0)", "pandas", "pillow (==8.2.0)", "pyro-api (>=0.1.2)", "pytest (==4.3.1)", "pytest-xdist (==1.27.0)", "requests", "scipy", "torchvision (>=0.12.0)"]
+torch = ["pyro-ppl (>=1.8.0)", "torch (>=1.11.0)"]
+
+[[package]]
 name = "graphviz"
 version = "0.20.1"
 description = "Simple Python interface for Graphviz"
@@ -1462,6 +1487,18 @@ wheel = "*"
 
 [package.extras]
 dask = ["dask[array] (>=2.0.0)", "dask[dataframe] (>=2.0.0)", "dask[distributed] (>=2.0.0)", "pandas"]
+
+[[package]]
+name = "makefun"
+version = "1.15.1"
+description = "Small library to dynamically create python functions."
+category = "main"
+optional = false
+python-versions = "*"
+files = [
+    {file = "makefun-1.15.1-py2.py3-none-any.whl", hash = "sha256:a63cfc7b47a539c76d97bd4fdb833c7d0461e759fd1225f580cb4be6200294d4"},
+    {file = "makefun-1.15.1.tar.gz", hash = "sha256:40b0f118b6ded0d8d78c78f1eb679b8b6b2462e3c1b3e05fb1b2da8cd46b48a5"},
+]
 
 [[package]]
 name = "markdown-it-py"
@@ -3365,4 +3402,4 @@ scikit-learn = ["scikit-learn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "395d097f33fdc9f5023d32ede44964985f1dd9fa5b5463618ebbe8e72b926dd5"
+content-hash = "7b81293b1f0a20ae7457e028b9113a54024bb1d976baf53e0b7a7a41b49e98ef"

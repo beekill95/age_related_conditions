@@ -23,6 +23,7 @@ arviz = "^0.15.1"
 torch = "^2.0.1"
 torchvision = "^0.15.2"
 torchaudio = "^2.0.2"
+funsor = "^0.4.5"
 
 [tool.poetry.group.dev.dependencies]
 jupyterlab = "^4.0.0"
