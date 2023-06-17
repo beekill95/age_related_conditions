@@ -20,10 +20,8 @@ xgboost = "^1.7.5"
 lightgbm = "^3.3.5"
 catboost = "^1.2"
 arviz = "^0.15.1"
-torch = "^2.0.1"
-torchvision = "^0.15.2"
-torchaudio = "^2.0.2"
 funsor = "^0.4.5"
+torch = {version = "^2.0.1+cpu", source = "torch-cpu"}
 
 [tool.poetry.group.dev.dependencies]
 jupyterlab = "^4.0.0"
@@ -31,6 +29,13 @@ jupytext = "^1.14.5"
 kaggle = "^1.5.13"
 ipywidgets = "^8.0.6"
 itables = "^1.5.2"
+
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+default = false
+secondary = true
 
 [build-system]
 requires = ["poetry-core"]
