@@ -16,9 +16,11 @@
 # %%
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, recall_score, precision_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -33,7 +35,7 @@ kaggle_submission = False
 # In this experiment,
 # I'll use autoencoder network to encode sample from feature space
 # to a small subspace.
-# Then the resulting vector will be fed to Bayesian logistic regression model.
+# Then the resulting vector will be fed to logistic regression model.
 #
 # ## Data
 
@@ -133,9 +135,12 @@ class AutoEncoder(nn.Module):
             nn.Linear(2048, input_shape),
         )
 
-    def forward(self, x):
+    def forward(self, x, encoder_only: bool = False):
         x = self.encoder(x)
-        x = self.decoder(x)
+
+        if not encoder_only:
+            x = self.decoder(x)
+
         return x
 
 
@@ -195,20 +200,74 @@ def create_training_and_evaluation_step(model: nn.Module, lr=1e-3, weight_decay=
     return train_step, evaluate_step
 
 
+def train(model: nn.Module,
+          *,
+          train_ds: DataLoader,
+          val_ds: DataLoader,
+          epochs: int,
+          early_stopping_patience: int = 10,
+          device: str = 'cpu'):
+    def save_checkpoint(model, path):
+        torch.save(model.state_dict(), path)
+
+    def load_checkpoint(model, path):
+        model.load_state_dict(torch.load(path))
+        return model
+
+
+    model = model.to(device)
+
+    train_step, val_step = create_training_and_evaluation_step(model, weight_decay=1e-2)
+    train_losses = []
+    val_losses = []
+
+    tmp_path = 'tmp_autoencoder.pth'
+
+    bar = tqdm(range(epochs), total=epochs, desc='Training')
+    for epoch in bar:
+        train_loss = train_step(train_ds, device, epoch, progress=False)
+        train_losses.append(train_loss)
+
+        val_loss = val_step(val_ds, device)
+        val_losses.append(val_loss)
+
+        bar.set_postfix_str(f'Train: {train_loss:.4f} - Val: {val_loss:.4f}')
+
+        if val_loss <= np.min(val_losses):
+            save_checkpoint(model, tmp_path)
+
+    # Best validation score and corresponding train score.
+    best_val_idx = np.argmin(val_losses)
+    print(f'Train: {train_losses[best_val_idx]:.4f} - Val: {val_losses[best_val_idx]:.4f} at epoch {best_val_idx}.')
+
+    # Restore the best model.
+    print('Restore the best model.')
+    return load_checkpoint(model, tmp_path)
+
+
+def balanced_log_loss(y_true, pred_prob):
+    nb_class_0 = np.sum(1 - y_true)
+    nb_class_1 = np.sum(y_true)
+
+    prob_0 = np.clip(1. - pred_prob, 1e-10, 1. - 1e-10)
+    prob_1 = np.clip(pred_prob, 1e-10, 1. - 1e-10)
+    return (-np.sum((1 - y_true) * np.log(prob_0)) / nb_class_0
+            - np.sum(y_true * np.log(prob_1)) / nb_class_1) / 2.
+
+
 # Data
 X = X_df.values
 
 # Training with 10-fold cross validation.
 device = 'cpu'
-kfold = KFold(n_splits=10)
-for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
-    autoencoder = AutoEncoder(X.shape[1]).to(device)
+kfold = StratifiedKFold(n_splits=10)
 
-    epochs = 100
-    train_step, val_step = create_training_and_evaluation_step(autoencoder, weight_decay=1e-2)
-    train_losses = []
-    val_losses = []
+train_log_losses = []
+train_f1_scores = []
+val_log_losses = []
+val_f1_scores = []
 
+for fold, (train_idx, val_idx) in enumerate(kfold.split(X, y)):
     Xtr = torch.tensor(X[train_idx], dtype=torch.float32)
     Xva = torch.tensor(X[val_idx], dtype=torch.float32)
     X_train_ds = TensorDataset(Xtr, Xtr) # pyright: ignore
@@ -217,16 +276,51 @@ for fold, (train_idx, val_idx) in enumerate(kfold.split(X)):
     Xtr_dataloader = DataLoader(X_train_ds, batch_size=64, shuffle=True)
     Xva_dataloader = DataLoader(X_val_ds, batch_size=64)
 
-    bar = tqdm(range(epochs), total=epochs, desc=f'Fold #{fold + 1}')
-    for epoch in bar:
-        train_loss = train_step(Xtr_dataloader, device, epoch, progress=False)
-        train_losses.append(train_loss)
+    autoencoder = AutoEncoder(X.shape[1]).to(device)
+    autoencoder = train(autoencoder,
+                        train_ds=Xtr_dataloader,
+                        val_ds=Xva_dataloader,
+                        epochs=100,
+                        early_stopping_patience=10,
+                        device=device)
 
-        val_loss = val_step(Xva_dataloader, device)
-        val_losses.append(val_loss)
+    # Use the autoencoder to encode data and train logistic regression model.
+    Xtr_encoded = autoencoder(Xtr, encoder_only=True).detach().cpu().numpy()
+    Xva_encoded = autoencoder(Xva, encoder_only=True).detach().cpu().numpy()
+    ytr = y[train_idx]
+    yva = y[val_idx]
 
-        bar.set_postfix_str(f'Train: {train_loss:.4f} - Val: {val_loss:.4f}')
+    logistic = LogisticRegression(max_iter = 10000000,
+                                  class_weight = 'balanced',
+                                  solver = 'liblinear')
+    logistic.fit(Xtr_encoded, ytr)
 
-    # Best validation score and corresponding train score.
-    best_val_idx = np.argmin(val_losses)
-    print(f'Train: {train_losses[best_val_idx]:.4f} - Val: {val_losses[best_val_idx]:.4f} at epoch {best_val_idx}.')
+    # Show the performance measures.
+    ytr_pred = logistic.predict(Xtr_encoded)
+    yva_pred = logistic.predict(Xva_encoded)
+
+    f1_train = f1_score(ytr, ytr_pred)
+    precision_train = precision_score(ytr, ytr_pred)
+    recall_train = recall_score(ytr, ytr_pred)
+    log_loss_train = balanced_log_loss(ytr, logistic.predict_proba(Xtr_encoded)[:, 1])
+    print(f'Train - f1={f1_train:.4f} recall={recall_train:.4f} precision={precision_train:.4f} log-loss={log_loss_train:.4f}')
+
+    f1_val = f1_score(yva, yva_pred)
+    precision_val = precision_score(yva, yva_pred)
+    recall_val = recall_score(yva, yva_pred)
+    log_loss_val = balanced_log_loss(yva, logistic.predict_proba(Xva_encoded)[:, 1])
+    print(f'Valid - f1={f1_val:.4f} recall={recall_val:.4f} precision={precision_val:.4f} log-loss={log_loss_val:.4f}')
+
+    # Store the results.
+    train_f1_scores.append(f1_train)
+    train_log_losses.append(log_loss_train)
+    val_f1_scores.append(f1_val)
+    val_log_losses.append(log_loss_val)
+
+
+# %%
+print(f'Train - F1={np.mean(train_f1_scores):.4f} +- {np.std(train_f1_scores):.4f}'
+      f'; Log Loss = {np.mean(train_log_losses):.4f} +- {np.std(train_log_losses):.4f}')
+print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
+      f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
+
