@@ -169,3 +169,6 @@ data/
 # No .ipynb please!
 *.ipynb
 submission.csv
+
+# Pytorch's models' checkpoints.
+*.pth

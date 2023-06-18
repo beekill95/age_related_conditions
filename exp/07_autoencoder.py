@@ -286,7 +286,11 @@ for fold, (train_idx, val_idx) in enumerate(kfold.split(X, y)):
 
     # Use the autoencoder to encode data and train logistic regression model.
     Xtr_encoded = autoencoder(Xtr, encoder_only=True).detach().cpu().numpy()
+    Xtr_encoded = np.concatenate(
+            [Xtr_encoded, ej.values[train_idx][..., None]], axis=1)
     Xva_encoded = autoencoder(Xva, encoder_only=True).detach().cpu().numpy()
+    Xva_encoded = np.concatenate(
+            [Xva_encoded, ej.values[val_idx][..., None]], axis=1)
     ytr = y[train_idx]
     yva = y[val_idx]
 
@@ -323,4 +327,3 @@ print(f'Train - F1={np.mean(train_f1_scores):.4f} +- {np.std(train_f1_scores):.4
       f'; Log Loss = {np.mean(train_log_losses):.4f} +- {np.std(train_log_losses):.4f}')
 print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
       f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
-
