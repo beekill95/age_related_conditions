@@ -187,7 +187,7 @@ def create_training_and_evaluation_step(
 
         # Second, features should not be correlated.
         cov = torch.t(x) @ x
-        cov = cov - torch.diag(cov)
+        cov = cov - torch.diag(torch.diag(cov))
         l2 = torch.mean(torch.abs(cov))
 
         return l1 + l2
@@ -272,7 +272,7 @@ def train(model: nn.Module,
 
     model = model.to(device)
 
-    train_step, val_step = create_training_and_evaluation_step(model, weight_decay=1e-2, regularization_weight=1e-1)
+    train_step, val_step = create_training_and_evaluation_step(model, weight_decay=1e-2, regularization_weight=0.1)
     train_losses = []
     val_losses = []
 
@@ -336,7 +336,7 @@ for fold, (train_idx, val_idx) in enumerate(kfold.split(X, y)):
     autoencoder = train(autoencoder,
                         train_ds=Xtr_dataloader,
                         val_ds=Xva_dataloader,
-                        epochs=100,
+                        epochs=300,
                         early_stopping_patience=10,
                         device=device)
 
@@ -385,12 +385,20 @@ print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
       f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
 
 # %% [markdown]
-# With `regularization_weight = 1e-2`:
+# ~~With `regularization_weight = 1e-2`:~~
 #
-# - Train - F1=0.6677 +- 0.0170; Log Loss = 0.3902 +- 0.0137
-# - Valid - F1=0.6049 +- 0.0876; Log Loss = 0.4482 +- 0.0917
+# - ~~Train - F1=0.6677 +- 0.0170; Log Loss = 0.3902 +- 0.0137~~
+# - ~~Valid - F1=0.6049 +- 0.0876; Log Loss = 0.4482 +- 0.0917~~
+#
+# ~~With `regularization_weight = 1e-1`:~~
+#
+# - ~~Train - F1=0.5612 +- 0.0440; Log Loss = 0.5167 +- 0.0222~~
+# - ~~Valid - F1=0.5618 +- 0.0613; Log Loss = 0.5307 +- 0.0346~~
+
+# %% [markdown]
+# __Corrected covariance regularization.__
 #
 # With `regularization_weight = 1e-1`:
 #
-# - Train - F1=0.5612 +- 0.0440; Log Loss = 0.5167 +- 0.0222
-# - Valid - F1=0.5618 +- 0.0613; Log Loss = 0.5307 +- 0.0346
+# - Train - F1=0.6041 +- 0.0207; Log Loss = 0.4803 +- 0.0171
+# - Valid - F1=0.6012 +- 0.0767; Log Loss = 0.4957 +- 0.0481
