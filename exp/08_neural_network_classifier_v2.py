@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.6
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -39,7 +39,10 @@ from tqdm.auto import tqdm
 from typing import Literal
 
 
-numpyro.set_host_device_count(4)
+# Still using cpu for numpyro,
+# not sure because my installation sucks, but using gpu is slower than cpu.
+numpyro.set_platform("cpu")
+numpyro.set_host_device_count(16)
 
 # %%
 kaggle_submission = False
@@ -413,7 +416,7 @@ def calculate_optimal_prob_prediction(y_preds: np.ndarray):
 X = X_df.values
 
 # Training with 10-fold cross validation.
-device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 kfold = StratifiedKFold(n_splits=10)
 
 train_log_losses = []
@@ -422,8 +425,8 @@ val_log_losses = []
 val_f1_scores = []
 
 for fold, (train_idx, val_idx) in enumerate(kfold.split(X, y)):
-    Xtr = torch.tensor(X[train_idx], dtype=torch.float32)
-    Xva = torch.tensor(X[val_idx], dtype=torch.float32)
+    Xtr = torch.tensor(X[train_idx], dtype=torch.float32).to(device)
+    Xva = torch.tensor(X[val_idx], dtype=torch.float32).to(device)
     ejtr = ej[train_idx]
     ytr = y[train_idx]
     ejva = ej[val_idx]
