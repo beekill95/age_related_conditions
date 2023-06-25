@@ -15,15 +15,20 @@ scikit-learn = "^1.2.2"
 pandas = "^2.0.1"
 seaborn = "^0.12.2"
 scipy = "^1.10.1"
-numpyro = "^0.11.0"
 xgboost = "^1.7.5"
 lightgbm = "^3.3.5"
 catboost = "^1.2"
 arviz = "^0.15.1"
 funsor = "^0.4.5"
+
+[tool.poetry.group.cpu]
+optional = true
+
+[tool.poetry.group.cpu.dependencies]
 torch = { version = "^2.0.1+cpu", source = "torch-cpu" }
 torchvision = { version = "^0.15.2+cpu", source = "torch-cpu" }
 torchaudio = { version = "^2.0.2+cpu", source = "torch-cpu" }
+numpyro = "^0.12.1"
 
 [tool.poetry.group.dev.dependencies]
 jupyterlab = "^4.0.0"
@@ -33,14 +38,37 @@ ipywidgets = "^8.0.6"
 itables = "^1.5.2"
 
 
+[tool.poetry.group.gpu]
+optional = true
+
+[tool.poetry.group.gpu.dependencies]
+torch = {version = "^2.0.1+cu118", source = "torch-gpu"}
+torchvision = {version = "^0.15.2+cu118", source = "torch-gpu"}
+torchaudio = {version = "^2.0.2+cu118", source = "torch-gpu"}
+numpyro = {extras = ["cuda"], version = "^0.12.1"}
+jax = {extras = ["cuda11-pip"], version = "^0.4.13"}
+
 [[tool.poetry.source]]
 name = "torch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 priority = "supplemental"
 
+
 [[tool.poetry.source]]
 name = "PyPI"
 priority = "primary"
+
+
+[[tool.poetry.source]]
+name = "torch-gpu"
+url = "https://download.pytorch.org/whl/cu118"
+priority = "supplemental"
+
+
+[[tool.poetry.source]]
+name = "jax-gpu"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+priority = "supplemental"
 
 [build-system]
 requires = ["poetry-core"]
