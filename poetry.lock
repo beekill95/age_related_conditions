@@ -2449,6 +2449,48 @@ files = [
 diagrams = ["jinja2", "railroad-diagrams"]
 
 [[package]]
+name = "pyro-api"
+version = "0.1.2"
+description = "Generic API for dispatch to Pyro backends."
+optional = false
+python-versions = "*"
+files = [
+    {file = "pyro-api-0.1.2.tar.gz", hash = "sha256:a1b900d9580aa1c2fab3b123ab7ff33413744da7c5f440bd4aadc4d40d14d920"},
+    {file = "pyro_api-0.1.2-py3-none-any.whl", hash = "sha256:10e0e42e9e4401ce464dab79c870e50dfb4f413d326fa777f3582928ef9caf8f"},
+]
+
+[package.extras]
+dev = ["ipython", "sphinx (>=2.0)", "sphinx-rtd-theme"]
+test = ["flake8", "pytest (>=5.0)"]
+
+[[package]]
+name = "pyro-ppl"
+version = "1.8.5"
+description = "A Python library for probabilistic modeling and inference"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "pyro-ppl-1.8.5.tar.gz", hash = "sha256:c2ac035995874f4adb8d07c92aa4594fe783ffde1614a59cce5e2e0d9cf19334"},
+    {file = "pyro_ppl-1.8.5-py3-none-any.whl", hash = "sha256:09616269053f45b9c230ed6bcfbde199b9c308780d972b863ef7bdb707a1c346"},
+]
+
+[package.dependencies]
+numpy = ">=1.7"
+opt-einsum = ">=2.3.2"
+pyro-api = ">=0.1.1"
+torch = ">=2.0.1"
+tqdm = ">=4.36"
+
+[package.extras]
+dev = ["black (>=21.4b0)", "flake8", "graphviz (>=0.8)", "isort (>=5.0)", "jupyter (>=1.0.0)", "lap", "matplotlib (>=1.3)", "mypy (>=0.812)", "nbformat", "nbsphinx (>=0.3.2)", "nbstripout", "nbval", "ninja", "pandas", "pillow (==8.2.0)", "pypandoc", "pytest (>=5.0)", "pytest-xdist", "scikit-learn", "scipy (>=1.1)", "seaborn (>=0.11.0)", "sphinx", "sphinx-rtd-theme", "torchvision (>=0.12.0)", "visdom (>=0.1.4,<0.2.2)", "wget", "yapf"]
+extras = ["graphviz (>=0.8)", "jupyter (>=1.0.0)", "lap", "matplotlib (>=1.3)", "pandas", "pillow (==8.2.0)", "scikit-learn", "seaborn (>=0.11.0)", "torchvision (>=0.12.0)", "visdom (>=0.1.4,<0.2.2)", "wget"]
+funsor = ["funsor[torch] (==0.4.4)"]
+horovod = ["horovod[pytorch] (>=0.19)"]
+lightning = ["pytorch-lightning"]
+profile = ["prettytable", "pytest-benchmark", "snakeviz"]
+test = ["black (>=21.4b0)", "flake8", "graphviz (>=0.8)", "jupyter (>=1.0.0)", "lap", "matplotlib (>=1.3)", "nbval", "pandas", "pillow (==8.2.0)", "pytest (>=5.0)", "pytest-cov", "scikit-learn", "scipy (>=1.1)", "seaborn (>=0.11.0)", "torchvision (>=0.12.0)", "visdom (>=0.1.4,<0.2.2)", "wget"]
+
+[[package]]
 name = "pyrsistent"
 version = "0.19.3"
 description = "Persistent/Functional/Immutable data structures"
@@ -3442,4 +3484,4 @@ scikit-learn = ["scikit-learn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "b56d43a79f6beda8960edcdceacd568d20f048c869e08fa0fa5c11aad4fd507f"
+content-hash = "6b4839b2f161b670e7b84fd6169fe9f3fafbda255e624724835eabce65e0edf9"

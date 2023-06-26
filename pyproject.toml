@@ -20,6 +20,7 @@ lightgbm = "^3.3.5"
 catboost = "^1.2"
 arviz = "^0.15.1"
 funsor = "^0.4.5"
+pyro-ppl = "^1.8.5"
 
 [tool.poetry.group.cpu]
 optional = true
