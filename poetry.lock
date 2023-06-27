@@ -3001,6 +3001,27 @@ files = [
 mpmath = ">=0.19"
 
 [[package]]
+name = "tabpfn"
+version = "0.1.9"
+description = "Interface for using TabPFN and library to train TabPFN'"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "tabpfn-0.1.9-py3-none-any.whl", hash = "sha256:fc0851e5bd5c9c6a35638f5fcc290ee67765944035b270521e26ed9402601871"},
+    {file = "tabpfn-0.1.9.tar.gz", hash = "sha256:f64bc39a0fecdcd1a0e7ed5fb813bbb64316fb24d69b38f3a37a54e2865a30d0"},
+]
+
+[package.dependencies]
+numpy = ">=1.21.2"
+pyyaml = ">=5.4.1"
+requests = ">=2.23.0"
+scikit-learn = ">=0.24.2"
+torch = ">=1.9.0"
+
+[package.extras]
+full = ["auto-sklearn (>=0.14.5)", "catboost (>=0.26.1)", "configspace (>=0.4.21)", "gpytorch (>=1.5.0)", "hyperopt (>=0.2.5)", "openml (>=0.12.2)", "seaborn (==0.11)", "tqdm (>=4.62.1)", "xgboost (>=1.4.0)"]
+
+[[package]]
 name = "tenacity"
 version = "8.2.2"
 description = "Retry code until it succeeds"
@@ -3484,4 +3505,4 @@ scikit-learn = ["scikit-learn"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "6b4839b2f161b670e7b84fd6169fe9f3fafbda255e624724835eabce65e0edf9"
+content-hash = "568042b7fc5182a35612132e83b24c8b49368dfe4353bb6588ffdbdc5cc9248a"
