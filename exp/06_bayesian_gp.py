@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.14.6
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -30,13 +30,13 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-numpyro.set_host_device_count(4)
+numpyro.set_host_device_count(16)
 
 # %%
 kaggle_submission = False
 
 # %% [markdown]
-# # Bayesian Gaussian Process
+# # Bayesian Gaussian Process (MESSY! DONT USE IT!)
 #
 # In this experiment,
 # I'll put gaussian process prior on the metric variables.
@@ -96,6 +96,8 @@ Xtest_df = pd.DataFrame(
 # ### Gaussian Process Model
 
 # %%
+
+
 def rbf_kernel(X: jax.Array, *, var, length, eps: float = 1e-9):
     """
     Calculate RBF kernel.
@@ -109,7 +111,7 @@ def rbf_kernel(X: jax.Array, *, var, length, eps: float = 1e-9):
         A 2d array of shape (N, N).
     """
     squared_dist = jnp.sum(
-            (jnp.expand_dims(X, axis=1) - X[None, ...])**2, axis=-1) # pyright: ignore
+        (jnp.expand_dims(X, axis=1) - X[None, ...])**2, axis=-1)  # pyright: ignore
     k = (var**2) * jnp.exp(-0.5 * squared_dist / (length**2))
 
     # Make sure that the covariance matrix is positive definite.
@@ -170,6 +172,7 @@ def logistic_regression_with_gp_prior(
 
     # Calculate kernel values.
     k = rbf_kernel(X, var=var, length=length)
+    print('k shape', k.shape)
     Lk = jnp.linalg.cholesky(k)
 
     # Sample from the covariance matrix.
@@ -178,42 +181,79 @@ def logistic_regression_with_gp_prior(
     #         dist.MultivariateNormal(loc=jnp.zeros(nb_obs), # pyright: ignore
     #                                 covariance_matrix=jnp.identity(nb_obs,
     #                                                                dtype=k.dtype)))
-    h = numpyro.sample('_h', dist.Normal(jnp.zeros(nb_obs), 1)) # pyright: ignore
-    print('Before multiplication', h.shape)
-    h = Lk @ h
+    with numpyro.plate('obs', nb_obs - 5):
+        zTr = numpyro.sample('_zTr', dist.Normal(0, 1))
+    # zTr = numpyro.sample('_zTr',
+    #                      dist.Normal(0, 1).expand((nb_obs - 5, )))
+    with numpyro.plate('pred', 5):
+        zTe = numpyro.sample('_zTe', dist.Normal(0, 1))
+    # zTe = numpyro.sample('zTe', dist.Normal(0, 1).expand([5]))
+    # with numpyro.plate('zSt', nb_obs):
+    #     z = numpyro.sample('_z', dist.Normal(0, 1))
+    z = jnp.concatenate([zTr, zTe])
+    print('Before multiplication', z.shape)
+    h = Lk @ z
     print(h.shape)
 
     # Prior for the group feature.
-    aG = numpyro.sample('aG', dist.Normal(0., 10.).expand((nb_groups, )))
+    with numpyro.plate('gg', 2):
+        aG = numpyro.sample('aG', dist.Normal(0., 10.))
+    # aG = numpyro.sample('aG', dist.Normal(0., 10.).expand((nb_groups, )))
 
     # Prior for guess term.
     guess = numpyro.sample('guess', dist.Beta(1., 1.))
 
-    prob = numpyro.deterministic('prob', expit(a0 + aG[g] + h)) # pyright: ignore
+    print('aG[g]', aG[g].shape)
+    prob = numpyro.deterministic(
+        'prob', expit(a0 + aG[g] + h))
     guess_prob = numpyro.deterministic(
-            'prob_w_guess', guess * 0.5 + (1 - guess) * prob) # pyright: ignore
+        'prob_w_guess', guess * 0.5 + (1. - guess) * prob)
+    print('guess prob', guess_prob.shape)
 
     # Predictions
-    yTe_mask = jnp.isnan(y)
-    yTe_idx = jnp.nonzero(yTe_mask)
-    yTe = numpyro.sample('yTe', dist.Bernoulli(guess_prob[yTe_mask]).mask(False))
-    print(y.shape, yTe.shape) # pyright: ignore
-    y = y.at[yTe_idx].set(yTe)
+    yTe_mask = np.isnan(y)
+    yTe_idx = jnp.asarray(np.nonzero(yTe_mask)[0])
+    print(yTe_idx)
+    with numpyro.plate('pred', 5) as pidx:
+        yTe = numpyro.sample('yTe', dist.Bernoulli(guess_prob[yTe_idx[pidx]]))
+    # yTe = numpyro.sample('yTe',
+    #                      dist.Bernoulli(guess_prob[-5:]).mask(False))
+    print(y.shape, yTe.shape)
+    # y = y.at[yTe_idx].set(yTe)
 
     # Observations.
-    numpyro.sample('y', dist.Bernoulli(guess_prob), obs=y)
+    with numpyro.plate('obs', Xtr.shape[0]) as idx:
+        numpyro.sample('y', dist.Bernoulli(guess_prob[idx]), obs=y[idx])
 
 
-kernel = NUTS(logistic_regression_with_gp_prior,
-              init_strategy=init_to_median) # pyright: ignore
-mcmc = MCMC(kernel, num_warmup=100, num_samples=100, num_chains=1)
 yTe = np.empty(len(Xtest_df))
 yTe[:] = np.nan
+# yTe = np.zeros(len(Xtest_df))
+with numpyro.handlers.seed(rng_seed=1):
+    trace = numpyro.handlers.trace(logistic_regression_with_gp_prior).get_trace(
+        Xtr=jnp.array(X_df.values),
+        Xte=jnp.array(Xtest_df.values),
+        y=jnp.asarray(np.concatenate([y, yTe])),
+        # y=jnp.asarray(y),
+        nb_groups=ej.cat.categories.size,
+        gtr=jnp.array(ej.cat.codes.values),
+        gte=jnp.array(ej_test.cat.codes.values),
+    )
+
+print(numpyro.util.format_shapes(trace))
+
+# %%
+kernel = NUTS(logistic_regression_with_gp_prior,
+              init_strategy=init_to_median)  # pyright: ignore
+mcmc = MCMC(kernel, num_warmup=1000, num_samples=1000, num_chains=1)
+# yTe = np.empty(len(Xtest_df))
+# yTe[:] = np.nan
 mcmc.run(
     random.PRNGKey(0),
     Xtr=jnp.array(X_df.values),
     Xte=jnp.array(Xtest_df.values),
     y=jnp.asarray(np.concatenate([y, yTe])),
+    # y=jnp.asarray(y),
     nb_groups=ej.cat.categories.size,
     gtr=jnp.array(ej.cat.codes.values),
     gte=jnp.array(ej_test.cat.codes.values),
