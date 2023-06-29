@@ -16,16 +16,16 @@
 # %%
 import jax
 from jax import random
-from jax.scipy.special import expit, logit
 import jax.numpy as jnp
 import numpy as np
 import numpyro
-from numpyro.infer import MCMC, NUTS, MixedHMC, DiscreteHMCGibbs, HMC
+from numpyro.infer import MCMC, NUTS, DiscreteHMCGibbs
 from numpyro.infer.initialization import init_to_median
 import numpyro.distributions as dist
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import f1_score, recall_score, precision_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -182,61 +182,162 @@ def logistic_regression_with_gp_prior(
         dist.MultivariateNormal(loc=jnp.zeros(nb_obs),
                                 scale_tril=Lk))
 
-    # print('h', h.shape)
     # Coefficients for groups.
-    # FIXME: why we need plate here?
-    # with numpyro.plate('aGSite', nb_groups):
-    #     aG = numpyro.sample('aG', dist.Normal(0., 10.))
     aG = numpyro.sample('aG', dist.Normal(0., 10.).expand([nb_groups]))
-    # print('aG', aG.shape)
 
     # Prior for guess term.
-    guess = numpyro.sample('guess', dist.Beta(1., 1.))
+    # guess = numpyro.sample('guess', dist.Beta(1., 1.))
 
     # Class probabilities.
-    prob = numpyro.deterministic('prob', expit(a0 + aG[g] + h))
-    guess_prob = numpyro.deterministic(
-        'prob_w_guess', guess * 0.5 + (1. - guess) * prob)
+    # prob = numpyro.deterministic('prob', expit(a0 + aG[g] + h))
+    # guess_prob = numpyro.deterministic(
+    #     'prob_w_guess', guess * 0.5 + (1. - guess) * prob)
+    logit = a0 + aG[g] + h
 
     # Predictions (if there is).
     if Xte is not None:
         nb_tests = Xte.shape[0]
 
         y_pred = numpyro.sample(
-            'y_pred', dist.Bernoulli(guess_prob[-nb_tests:]).mask(False))
-        # with numpyro.plate('y_pred_site', nb_tests) as tidx:
-        #     # print('tidx', tidx)
-        #     y_pred = numpyro.sample(
-        #         'y_pred', dist.Bernoulli(guess_prob[-tidx - 1]).mask(False))
-
-        # print('y_pred', y_pred.shape, 'guess_prrob', guess_prob[-tidx - 1])
+            'y_pred', dist.Bernoulli(logits=logit[-nb_tests:]).mask(False))
         y = jnp.concatenate([y, y_pred])
 
-    # print('full guess prob', guess_prob)
     # Perform inference.
-    # with numpyro.plate('obs', nb_obs):
-    #     numpyro.sample('y', dist.Bernoulli(guess_prob), obs=y)
-    numpyro.sample('y', dist.Bernoulli(guess_prob), obs=y)
+    yrv = numpyro.sample('y', dist.Bernoulli(logits=logit), obs=y)
+
+    # To make things easier for prediction task.
+    nb_Xtr = Xtr.shape[0]
+    numpyro.deterministic('y_obs', yrv[:nb_Xtr])
 
 
-with numpyro.handlers.seed(rng_seed=1):
-    trace = (numpyro.handlers
-             .trace(logistic_regression_with_gp_prior)
-             .get_trace(
-                 Xtr=jnp.array(X_df.values),
-                 Xte=jnp.array(Xtest_df.values),
-                 y=jnp.asarray(y),
-                 nb_groups=ej.cat.categories.size,
-                 gtr=jnp.array(ej.cat.codes.values),
-                 gte=jnp.array(ej_test.cat.codes.values),
-             ))
+# For debugging shapes.
+# with numpyro.handlers.seed(rng_seed=1):
+#     trace = (numpyro.handlers
+#              .trace(logistic_regression_with_gp_prior)
+#              .get_trace(
+#                  Xtr=jnp.array(X_df.values),
+#                  Xte=jnp.array(Xtest_df.values),
+#                  y=jnp.asarray(y),
+#                  nb_groups=ej.cat.categories.size,
+#                  gtr=jnp.array(ej.cat.codes.values),
+#                  gte=jnp.array(ej_test.cat.codes.values),
+#              ))
 
-print(numpyro.util.format_shapes(trace))
+# print(numpyro.util.format_shapes(trace))
+
+# %%
+def calculate_best_prob_prediction(y_preds: np.ndarray):
+    """
+    Calculate the best probability prediction based on the above formula.
+
+    y_preds: numpy array of shape (nb_draws, nb_data_points).
+    """
+    assert y_preds.ndim == 2, "Only accept 2d numpy array as input."
+    _, nb_data = y_preds.shape
+    print(y_preds.shape)
+
+    # Calculate number of classes for each draw.
+    nb_class_0 = np.sum(1 - y_preds, axis=1)
+    print(nb_class_0.shape)
+    nb_class_1 = np.sum(y_preds, axis=1)
+
+    best_probs = []
+    eps = 1e-15
+    for j in range(nb_data):
+        cj = np.sum(y_preds[:, j] / (nb_class_1 + eps))
+        cj_1 = np.sum((1 - y_preds[:, j]) / (nb_class_0 + eps))
+
+        prob = cj / (cj + cj_1)
+        best_probs.append(prob)
+
+    return np.asarray(best_probs)
+
+
+def balanced_log_loss(y_true, pred_prob):
+    nb_class_0 = np.sum(1 - y_true)
+    nb_class_1 = np.sum(y_true)
+
+    prob_0 = np.clip(1. - pred_prob, 1e-10, 1. - 1e-10)
+    prob_1 = np.clip(pred_prob, 1e-10, 1. - 1e-10)
+    return (-np.sum((1 - y_true) * np.log(prob_0)) / nb_class_0
+            - np.sum(y_true * np.log(prob_1)) / nb_class_1) / 2.
+
+
+def cross_validation(n_folds: int = 10):
+    def f1_recall_precision(ytrue, ypred):
+        return tuple(f(ytrue, ypred)
+                     for f in [f1_score, recall_score, precision_score])
+
+    kfold = StratifiedKFold(n_splits=n_folds)
+
+    results = []
+    for train_idx, val_idx in kfold.split(X_df, y):
+        Xtr, Xva = X_df.iloc[train_idx].values, X_df.iloc[val_idx].values
+        gtr, gva = ej[train_idx].cat.codes.values, ej[val_idx].cat.codes.values
+        ytr, yva = y[train_idx], y[val_idx]
+
+        # Perform inference and prediction at the same time.
+        kernel = NUTS(logistic_regression_with_gp_prior,
+                      init_strategy=init_to_median)
+        kernel = DiscreteHMCGibbs(kernel, modified=True)
+        mcmc = MCMC(kernel, num_warmup=200, num_samples=200, num_chains=1)
+        mcmc.run(
+            random.PRNGKey(0),
+            Xtr=jnp.array(Xtr),
+            Xte=jnp.array(Xva),
+            y=jnp.asarray(ytr),
+            nb_groups=ej.cat.categories.size,
+            gtr=jnp.array(gtr),
+            gte=jnp.array(gva),
+        )
+
+        # Get samples to measure the performance of the model.
+        samples = mcmc.get_samples()
+        y_obs_samples = samples['y_obs']
+        y_pred_samples = samples['y_pred']
+
+        y_obs_median = np.median(y_obs_samples, axis=0)
+        y_pred_median = np.median(y_pred_samples, axis=0)
+
+        # Calculate f1, precision, and recall scores.
+        (f1_train,
+         recall_train,
+         precision_train) = f1_recall_precision(ytr, y_obs_median)
+        train_pred_prob = calculate_best_prob_prediction(y_obs_samples)
+        log_score_train = balanced_log_loss(ytr, train_pred_prob)
+
+        (f1_val,
+         recall_val,
+         precision_val) = f1_recall_precision(yva, y_pred_median)
+        val_pred_prob = calculate_best_prob_prediction(y_pred_samples)
+        log_score_val = balanced_log_loss(yva, val_pred_prob)
+
+        print(f'{f1_train=:.4f}, {log_score_train=:.4f} == {f1_val=:.4f}, {log_score_val=:.4f}')
+
+        # Store the results.
+        results.append({
+            'f1_train': f1_train,
+            'recall_train': recall_train,
+            'precision_train': precision_train,
+            'log_score_train': log_score_train,
+            'f1_val': f1_val,
+            'recall_val': recall_val,
+            'precision_val': precision_val,
+            'log_score_val': log_score_val,
+        })
+
+    return pd.DataFrame(results)
+
+
+results = cross_validation(10)
+
+# %%
+# Summarize the results.
+results.describe()
 
 # %%
 kernel = NUTS(logistic_regression_with_gp_prior,
               init_strategy=init_to_median)
-# kernel = MixedHMC(HMC(logistic_regression_with_gp_prior))
 kernel = DiscreteHMCGibbs(kernel, modified=True)
 mcmc = MCMC(kernel, num_warmup=200, num_samples=200, num_chains=1)
 mcmc.run(
