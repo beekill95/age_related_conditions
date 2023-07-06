@@ -16,6 +16,7 @@
 # %%
 from jax import random
 import jax.numpy as jnp
+from jax.scipy.special import expit
 import numpy as np
 import numpyro
 from numpyro.infer import MCMC, NUTS, Predictive
@@ -33,6 +34,7 @@ numpyro.set_host_device_count(16)
 
 # %%
 kaggle_submission = False
+run_cv = True
 
 # %% [markdown]
 # # Bayesian Logistics Regression
@@ -174,7 +176,7 @@ class BayesianLogisticRegression:
             num_samples: int = 20000,
             num_chains: int = 4,
             print_summary: bool = False):
-        kernel = NUTS(self._logistic_regression_model)
+        kernel = NUTS(self._robust_logistic_regression_model)
         mcmc = MCMC(kernel, num_warmup=num_warmup,
                     num_samples=num_samples, num_chains=num_chains)
 
@@ -199,7 +201,7 @@ class BayesianLogisticRegression:
         assert self._mcmc is not None and self._nb_groups is not None
 
         predictive = Predictive(
-            self._logistic_regression_model,
+            self._robust_logistic_regression_model,
             self._mcmc.get_samples(),
             return_sites=['y', 'prob', 'prob_w_guess'])
         predictions = predictive(
@@ -212,7 +214,7 @@ class BayesianLogisticRegression:
         return predictions['y']
 
     @staticmethod
-    def _logistic_regression_model(
+    def _robust_logistic_regression_model(
             *, X: jnp.ndarray, group: jnp.ndarray,
             nb_groups: int, y: jnp.ndarray | None = None):
         nb_obs, nb_features = X.shape
@@ -222,19 +224,26 @@ class BayesianLogisticRegression:
         a0 = numpyro.sample('_a0', dist.Normal(0., 1.))
 
         # Prior for the coefficients of metric features.
-        a = numpyro.sample('_a', dist.Normal(0., 1.).expand((nb_features, )))
+        a_sigma = numpyro.sample('_aSigma', dist.Gamma(1., 1.))
+        a = numpyro.sample(
+            '_a', dist.StudentT(1., 0., a_sigma).expand((nb_features, )))
 
         # Prior for the group feature.
         aG = numpyro.sample('_aG', dist.Normal(0., 1.).expand((nb_groups, )))
 
+        # Prior for guess term.
+        guess = numpyro.sample('guess', dist.Beta(1., 1.))
+
         # Observations.
         with numpyro.plate('obs', nb_obs) as idx:
-            logit = numpyro.deterministic(
-                'logit', a0 + jnp.dot(X[idx], a) + aG[group[idx]])
+            prob = numpyro.deterministic(
+                'prob', expit(a0 + jnp.dot(X[idx], a) + aG[group[idx]]))
+            guess_prob = numpyro.deterministic(
+                'prob_w_guess', guess * 0.5 + (1 - guess) * prob)
             if y is not None:
-                numpyro.sample('y', dist.BernoulliLogits(logit), obs=y[idx])
+                numpyro.sample('y', dist.Bernoulli(guess_prob), obs=y[idx])
             else:
-                numpyro.sample('y', dist.BernoulliLogits(logit))
+                numpyro.sample('y', dist.Bernoulli(guess_prob))
 
 
 # %% [markdown]
@@ -303,6 +312,7 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
     val_f1_scores = []
 
     for fold, (train_idx, val_idx) in enumerate(kfold.split(X_df, y)):
+        print(f'\n-- Fold #{fold + 1} / {n_folds}:')
         Xtr_df, ytr = X_df.iloc[train_idx], y[train_idx]
         Xva_df, yva = X_df.iloc[val_idx], y[val_idx]
 
@@ -311,6 +321,7 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
         iv, _ = iv_woe(Xtr_df, ytr, bins=15)
         iv = iv.set_index("Variable")
         imp_iv_features = iv[(iv['IV'] >= 0.3) & (iv['IV'] <= 0.5)].index
+        print('Number of important features: ', len(imp_iv_features))
 
         Xtr_df = Xtr_df[imp_iv_features]
         Xva_df = Xva_df[imp_iv_features]
@@ -319,7 +330,9 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
         model = (BayesianLogisticRegression()
                  .fit(X=Xtr_df.values,
                       group=ej[train_idx].cat.codes.values,
-                      y=ytr))
+                      y=ytr,
+                      num_chains=8,
+                      num_samples=2000))
 
         # Perform predictions on on the validation data.
         tr_predictions = model.predict(
@@ -360,14 +373,31 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
             val_log_losses)
 
 
-(train_f1_scores,
- train_log_losses,
- val_f1_scores,
- val_log_losses) = cross_validation(all_df, y, ej, n_folds=10)
+if run_cv:
+    (train_f1_scores,
+     train_log_losses,
+     val_f1_scores,
+     val_log_losses) = cross_validation(all_df, y, ej, n_folds=10)
+else:
+    print('SKIP cross-validation')
 
 
 # %%
-print(f'Train - F1={np.mean(train_f1_scores):.4f} +- {np.std(train_f1_scores):.4f}'
-      f'; Log Loss = {np.mean(train_log_losses):.4f} +- {np.std(train_log_losses):.4f}')
-print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
-      f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
+if run_cv:
+    print(f'Train - F1={np.mean(train_f1_scores):.4f} +- {np.std(train_f1_scores):.4f}'
+          f'; Log Loss = {np.mean(train_log_losses):.4f} +- {np.std(train_log_losses):.4f}')
+    print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
+          f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
+else:
+    print('NO METRICS due to CROSS-VALIDATION is SKIPPED!')
+
+# %% [markdown]
+# Unrobust model:
+#
+# * Train - F1=0.9389 +- 0.0103; Log Loss = 0.1400 +- 0.0119
+# * Valid - F1=0.6996 +- 0.0615; Log Loss = 0.3849 +- 0.1463
+#
+# Robust Model:
+#
+# * Train - F1=0.9095 +- 0.0270; Log Loss = 0.1992 +- 0.0312
+# * Valid - F1=0.6900 +- 0.1042; Log Loss = 0.3490 +- 0.0901

@@ -16,6 +16,7 @@
 # %%
 from jax import random
 import jax.numpy as jnp
+from jax.scipy.special import expit
 import numpy as np
 import numpyro
 from numpyro.infer import MCMC, NUTS, Predictive
@@ -149,7 +150,7 @@ class BayesianLogisticRegression:
             num_samples: int = 20000,
             num_chains: int = 4,
             print_summary: bool = False):
-        kernel = NUTS(self._logistic_regression_model)
+        kernel = NUTS(self._robust_logistic_regression_model)
         mcmc = MCMC(kernel, num_warmup=num_warmup,
                     num_samples=num_samples, num_chains=num_chains)
 
@@ -174,7 +175,7 @@ class BayesianLogisticRegression:
         assert self._mcmc is not None and self._nb_groups is not None
 
         predictive = Predictive(
-            self._logistic_regression_model,
+            self._robust_logistic_regression_model,
             self._mcmc.get_samples(),
             return_sites=['y', 'prob', 'prob_w_guess'])
         predictions = predictive(
@@ -187,7 +188,7 @@ class BayesianLogisticRegression:
         return predictions['y']
 
     @staticmethod
-    def _logistic_regression_model(
+    def _robust_logistic_regression_model(
             *, X: jnp.ndarray, group: jnp.ndarray,
             nb_groups: int, y: jnp.ndarray | None = None):
         nb_obs, nb_features = X.shape
@@ -197,20 +198,26 @@ class BayesianLogisticRegression:
         a0 = numpyro.sample('_a0', dist.Normal(0., 1.))
 
         # Prior for the coefficients of metric features.
-        a = numpyro.sample('_a', dist.Normal(0., 1.).expand((nb_features, )))
+        a_sigma = numpyro.sample('_aSigma', dist.Gamma(1., 1.))
+        a = numpyro.sample(
+            '_a', dist.StudentT(1., 0., a_sigma).expand((nb_features, )))
 
         # Prior for the group feature.
         aG = numpyro.sample('_aG', dist.Normal(0., 1.).expand((nb_groups, )))
 
+        # Prior for guess term.
+        guess = numpyro.sample('guess', dist.Beta(1., 1.))
+
         # Observations.
         with numpyro.plate('obs', nb_obs) as idx:
-            logit = numpyro.deterministic(
-                'logit', a0 + jnp.dot(X[idx], a) + aG[group[idx]])
+            prob = numpyro.deterministic(
+                'prob', expit(a0 + jnp.dot(X[idx], a) + aG[group[idx]]))
+            guess_prob = numpyro.deterministic(
+                'prob_w_guess', guess * 0.5 + (1 - guess) * prob)
             if y is not None:
-                numpyro.sample('y', dist.BernoulliLogits(logit), obs=y[idx])
+                numpyro.sample('y', dist.Bernoulli(guess_prob), obs=y[idx])
             else:
-                numpyro.sample('y', dist.BernoulliLogits(logit))
-
+                numpyro.sample('y', dist.Bernoulli(guess_prob))
 
 # %% [markdown]
 # ### Cross-Validation
@@ -220,6 +227,8 @@ class BayesianLogisticRegression:
 
 # %%
 # Some useful utilities.
+
+
 def balanced_log_loss(y_true, pred_prob):
     nb_class_0 = np.sum(1 - y_true)
     nb_class_1 = np.sum(y_true)
@@ -294,8 +303,10 @@ for fold, (train_idx, val_idx) in enumerate(kfold.split(X_df, y)):
              .fit(X=Xtr_df.values, group=ej[train_idx].cat.codes.values, y=ytr))
 
     # Perform predictions on on the validation data.
-    tr_predictions = model.predict(X=Xtr_df.values, group=ej[train_idx].cat.codes.values)
-    va_predictions = model.predict(X=Xva_df.values, group=ej[val_idx].cat.codes.values)
+    tr_predictions = model.predict(
+        X=Xtr_df.values, group=ej[train_idx].cat.codes.values)
+    va_predictions = model.predict(
+        X=Xva_df.values, group=ej[val_idx].cat.codes.values)
 
     # Use median as our point prediciton.
     ytr_pred = np.median(tr_predictions, axis=0)
@@ -330,3 +341,14 @@ print(f'Train - F1={np.mean(train_f1_scores):.4f} +- {np.std(train_f1_scores):.4
       f'; Log Loss = {np.mean(train_log_losses):.4f} +- {np.std(train_log_losses):.4f}')
 print(f'Valid - F1={np.mean(val_f1_scores):.4f} +- {np.std(val_f1_scores):.4f}'
       f'; Log Loss = {np.mean(val_log_losses):.4f} +- {np.std(val_log_losses):.4f}')
+
+# %% [markdown]
+# Previous run, using normal logistic regression model:
+#
+# * Train - F1=0.4279 +- 0.0376; Log Loss = 0.4981 +- 0.0234
+# * Valid - F1=0.4825 +- 0.1822; Log Loss = 0.5059 +- 0.0742
+#
+# With the robust regression, we see improvements in the scores:
+#
+# * Train - F1=0.4860 +- 0.0433; Log Loss = 0.4941 +- 0.0269
+# * Valid - F1=0.4993 +- 0.1230; Log Loss = 0.4866 +- 0.0522
