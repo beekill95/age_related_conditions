@@ -360,7 +360,7 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
         Xva_df = Xva_df[imp_iv_features]
 
         # Filter correlated features.
-        Xtr_df = filter_correlated_features(Xtr_df, correlation_threshold=0.85)
+        Xtr_df = filter_correlated_features(Xtr_df, correlation_threshold=0.95)
         Xva_df = Xva_df[Xtr_df.columns]
         print('Number of uncorrelated features: ', len(Xtr_df.columns))
 
@@ -370,7 +370,7 @@ def cross_validation(X_df, y, ej, n_folds: int = 10):
                       group=ej[train_idx].cat.codes.values,
                       y=ytr,
                       num_chains=8,
-                      num_samples=2000))
+                      num_samples=500))
 
         # Perform predictions on on the validation data.
         tr_predictions = model.predict(
@@ -464,3 +464,13 @@ else:
 #
 # * Train - F1=0.9337 +- 0.0149; Log Loss = 0.1666 +- 0.0154
 # * Valid - F1=0.7739 +- 0.0869; Log Loss = 0.3008 +- 0.0687
+#
+# Robust model, iiv >= 0.05, correlation threshold >= 0.9:
+#
+# * Train - F1=0.9340 +- 0.0107; Log Loss = 0.1599 +- 0.0112
+# * Valid - F1=0.7329 +- 0.0541; Log Loss = 0.3118 +- 0.0726
+#
+# Robust model, iiv >= 0.05, correlation threshold >= 0.95:
+#
+# * Train - F1=0.9370 +- 0.0121; Log Loss = 0.1566 +- 0.0130
+# * Valid - F1=0.7383 +- 0.0760; Log Loss = 0.3080 +- 0.0716
