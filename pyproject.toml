@@ -22,6 +22,7 @@ arviz = "^0.15.1"
 funsor = "^0.4.5"
 pyro-ppl = "^1.8.5"
 tabpfn = "^0.1.9"
+imbalanced-learn = "^0.11.0"
 
 [tool.poetry.group.cpu]
 optional = true
