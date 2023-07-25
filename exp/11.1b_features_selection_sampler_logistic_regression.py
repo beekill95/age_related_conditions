@@ -386,7 +386,7 @@ def train_and_evaluate(*,
         columns=Xte.columns)
 
     # Next, we'll filter out correlated features.
-    Xtr = filter_in_uncorrelated_features(Xtr, 0.7)
+    Xtr = filter_in_uncorrelated_features(Xtr, 0.2)
     Xte = Xte[Xtr.columns]
 
     # Next, we'll perform sampling.
@@ -414,9 +414,10 @@ def train_and_evaluate(*,
     ytr_preds = model.predict(X=Xtr, group=gtr)
     ytr_pred = np.median(ytr_preds, axis=0)
     ytr_prob = calculate_optimal_prob_prediction(ytr_preds)
+    print(ytr, ytr_pred)
     (f1_train,
      recall_train,
-     precision_train) = f1_recall_precision(ytr, ytr_pred)
+     precision_train) = f1_recall_precision(ytr, np.where(ytr_pred == 0.5, 0., ytr_pred))
     log_loss_train = balanced_log_loss(ytr, ytr_prob)
     print(f'Train - f1={f1_train:.4f} recall={recall_train:.4f} '
           f'precision={precision_train:.4f} log-loss={log_loss_train:.4f}')
@@ -500,3 +501,42 @@ cv_results.describe()
 # |  50%  | 0.932614  | 0.697826  | 0.165937       | 0.329248      |
 # |  75%  | 0.947780  | 0.755639  | 0.176564       | 0.376480      |
 # |  max  | 0.968421  | 0.833333  | 0.183823       | 0.439812      |
+#
+# * With `correlation_threshold = 0.4` and __NO__ oversampling:
+#
+# |       |  f1_train |   f1_test | log_loss_train | log_loss_test |
+# |------:|----------:|----------:|---------------:|--------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000     |
+# |  mean | 0.902882  | 0.725714  | 0.192658       | 0.322609      |
+# |  std  | 0.022662  | 0.098477  | 0.016956       | 0.079515      |
+# |  min  | 0.854054  | 0.600000  | 0.162492       | 0.202493      |
+# |  25%  | 0.900131  | 0.643939  | 0.180004       | 0.264104      |
+# |  50%  | 0.908125  | 0.696154  | 0.194698       | 0.338991      |
+# |  75%  | 0.915705  | 0.820652  | 0.204677       | 0.392374      |
+# |  max  | 0.930693  | 0.857143  | 0.219674       | 0.419398      |
+#
+# * With `correlation_threshold = 0.3` and __NO__ oversampling:
+#
+# |       |  f1_train |   f1_test | log_loss_train | log_loss_test |
+# |------:|----------:|----------:|---------------:|--------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000     |
+# |  mean | 0.864258  | 0.692714  | 0.222028       | 0.332366      |
+# |  std  | 0.041862  | 0.084207  | 0.020829       | 0.064161      |
+# |  min  | 0.806630  | 0.588235  | 0.185819       | 0.226682      |
+# |  25%  | 0.835346  | 0.640351  | 0.207924       | 0.285178      |
+# |  50%  | 0.865091  | 0.666667  | 0.227037       | 0.331162      |
+# |  75%  | 0.895000  | 0.761957  | 0.238963       | 0.388452      |
+# |  max  | 0.930000  | 0.842105  | 0.243525       | 0.415434      |
+#
+# * With `correlation_threshold = 0.2` and __NO__ oversampling:
+#
+# |       |  f1_train |   f1_test | log_loss_train | log_loss_test |
+# |------:|----------:|----------:|---------------:|--------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000     |
+# |  mean | 0.860647  | 0.709824  | 0.228316       | 0.323268      |
+# |  std  | 0.022414  | 0.093047  | 0.016473       | 0.071195      |
+# |  min  | 0.827957  | 0.588235  | 0.202804       | 0.220746      |
+# |  25%  | 0.842516  | 0.616667  | 0.220393       | 0.271502      |
+# |  50%  | 0.860150  | 0.735000  | 0.227177       | 0.339066      |
+# |  75%  | 0.877728  | 0.781401  | 0.239860       | 0.370458      |
+# |  max  | 0.892308  | 0.842105  | 0.253554       | 0.417500      |
