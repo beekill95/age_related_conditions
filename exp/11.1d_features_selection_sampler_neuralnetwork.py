@@ -229,16 +229,19 @@ class NNClassifier(nn.Module):
             nn.ReLU(),
             nn.Dropout(),
             nn.LayerNorm(1024),
+
             nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Dropout(),
             nn.LayerNorm(512),
+
             nn.Linear(512, 64),
+            # nn.Tanh(),
         )
 
         self.output = nn.Sequential(
-            nn.Dropout(),
-            # nn.LayerNorm(64),
+            # nn.Dropout(),
+            nn.LayerNorm(64),
             nn.Linear(64, 1),
         )
 
@@ -364,7 +367,7 @@ def train(model: nn.Module,
           train_ds: DataLoader,
           val_ds: DataLoader,
           epochs: int,
-          early_stopping_patience: int = 10,
+          early_stopping_patience: int = 100,
           device: str = 'cpu',
           lr: float = 1e-3,
           weight_decay: float = 1e-2,
@@ -388,6 +391,7 @@ def train(model: nn.Module,
 
     tmp_path = 'tmp_autoencoder.pth'
 
+    patience = 0
     bar = tqdm(range(epochs), total=epochs, desc='Training')
     for epoch in bar:
         train_loss, train_regu_loss = train_step(
@@ -401,18 +405,28 @@ def train(model: nn.Module,
             f'Train: {train_loss:.4f} - Val: {val_loss:.4f}'
             f'-Train Reg: {train_regu_loss:.4f} - Val Reg:{val_regu_loss:.4f}')
 
+        patience += 1
         if val_loss <= np.min(val_losses):
             save_checkpoint(model, tmp_path)
+            patience = 0
+        else:
+            if patience > early_stopping_patience:
+                print(f'The validation does not improve for the last {patience} epochs. '
+                      'Early stopping!')
+                break
 
     # Best validation score and corresponding train score.
     best_val_idx = np.argmin(val_losses)
     print(
-        f'Train: {train_losses[best_val_idx]:.4f}'
+        f'Train: {train_losses[best_val_idx]:.4f} '
         f'- Val: {val_losses[best_val_idx]:.4f} at epoch {best_val_idx}.')
 
     # Restore the best model.
     print('Restore the best model.')
-    return load_checkpoint(model, tmp_path)
+    return (load_checkpoint(model, tmp_path),
+            dict(train_loss=train_losses,
+                 val_loss=val_losses,
+                 best_epoch=best_val_idx))
 
 
 # %% [markdown]
@@ -495,12 +509,33 @@ def f1_recall_precision(y_true, y_pred):
                  for f in [f1_score, recall_score, precision_score])
 
 
+def plot_train_history(history: dict, epochs: int):
+    fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
+
+    train_loss = history['train_loss']
+    val_loss = history['val_loss']
+
+    epochs = list(range(len(train_loss)))
+    ax.plot(epochs, train_loss, label='Train Loss')
+    ax.plot(epochs, val_loss, label='Val Loss')
+    ax.vlines(
+        history['best_epoch'],
+        ymin=min(min(train_loss), min(val_loss)),
+        ymax=max(max(train_loss), max(val_loss)),
+        label='Best epoch',
+        linestyles='dashed')
+    ax.legend()
+
+    return fig
+
+
 def train_and_evaluate(*,
                        Xtr, gtr, ytr,
                        Xte, gte, yte,
                        epochs: int = 100,
                        device: str = 'cpu',
                        lr: float = 1e-3,
+                       early_stopping_patience: int = 100,
                        correlation_threshold: float = 0.3,
                        weight_decay: float = 1e-2,
                        regularization_weight: float = 1.0):
@@ -552,15 +587,20 @@ def train_and_evaluate(*,
 
     Xtr_dataloader = DataLoader(X_train_ds, batch_size=64, shuffle=True)
     Xva_dataloader = DataLoader(X_val_ds, batch_size=64)
-    model = train(NNClassifier(nb_features),
-                  train_ds=Xtr_dataloader,
-                  val_ds=Xva_dataloader,
-                  epochs=400,
-                  early_stopping_patience=10,
-                  device=device,
-                  lr=lr,
-                  weight_decay=weight_decay,
-                  regularization_weight=regularization_weight)
+    model, history = train(NNClassifier(nb_features),
+                           train_ds=Xtr_dataloader,
+                           val_ds=Xva_dataloader,
+                           epochs=epochs,
+                           early_stopping_patience=early_stopping_patience,
+                           device=device,
+                           lr=lr,
+                           weight_decay=weight_decay,
+                           regularization_weight=regularization_weight)
+
+    # Plot training history.
+    fig = plot_train_history(history, epochs=epochs)
+    plt.show()
+    plt.close(fig)
 
     # Evaluate the model.
     ytr_prob = (model(
@@ -629,9 +669,10 @@ cv_results = cross_validations(
     grp=ej.cat.codes.values,
     y=y,
     n_folds=10,
-    epochs=400,
+    epochs=2000,
     correlation_threshold=0.3,
-    lr=1e-3,
+    lr=1e-4,
+    early_stopping_patience=100,
     weight_decay=1e-2,
     regularization_weight=1.0)
 
@@ -715,4 +756,21 @@ cv_results.describe()
 # |  75%  | 1.000000  | 0.851190  | 0.104328       | 0.163339           | 0.398867      | 0.375037          |
 # |  max  | 1.000000  | 0.909091  | 0.185507       | 0.238555           | 0.510923      | 0.475515          |
 
-# %%
+# %% [markdown]
+# ---
+# * Architecture: 1024 (ReLu, Dropout, LayerNorm) -> 512 (ReLu, Dropout, LayerNorm) -> 64 (LayerNorm) -> 1
+# * Correlation Threshold: 0.3
+# * LR: 1-4
+# * Weight Decay: 1e-2
+# * Regularization weight: 1.0
+#
+# |       |  f1_train |   f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test |
+# |------:|----------:|----------:|---------------:|-------------------:|--------------:|------------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000          | 10.000000     | 10.000000         |
+# |  mean | 0.938530  | 0.742627  | 0.092418       | 0.077374           | 0.405253      | 0.312122          |
+# |  std  | 0.051880  | 0.166587  | 0.084953       | 0.058434           | 0.204523      | 0.142484          |
+# |  min  | 0.855615  | 0.421053  | 0.007355       | 0.007776           | 0.134701      | 0.123478          |
+# |  25%  | 0.904306  | 0.727273  | 0.017311       | 0.030913           | 0.286190      | 0.225457          |
+# |  50%  | 0.934707  | 0.768421  | 0.068624       | 0.077364           | 0.401148      | 0.307984          |
+# |  75%  | 0.991063  | 0.856719  | 0.143486       | 0.111764           | 0.517706      | 0.411845          |
+# |  max  | 0.994872  | 0.956522  | 0.235547       | 0.186239           | 0.792556      | 0.572658          |
