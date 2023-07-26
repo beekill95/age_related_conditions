@@ -242,6 +242,7 @@ class NNClassifier(nn.Module):
         self.output = nn.Sequential(
             # nn.Dropout(),
             nn.LayerNorm(64),
+            # nn.Dropout(),
             nn.Linear(64, 1),
         )
 
@@ -297,7 +298,8 @@ def create_training_and_evaluation_step(
         return l1 + l2
 
     def train_step(dataloader: DataLoader, *,
-                   device: str, epoch: int, progress: bool = True):
+                   device: str, epoch: int, progress: bool = True,
+                   train_noise: float = 0.0):
         model.train()
 
         train_loss = 0
@@ -310,6 +312,9 @@ def create_training_and_evaluation_step(
             else enumerate(dataloader))
         for i, (X, y) in bar:
             X, y = X.to(device), y.to(device)
+
+            # Add noise to the training.
+            X = X + train_noise * torch.rand_like(X)
 
             # Make prediction and calculate loss.
             encoder_output = model(X, mode='encoder')
@@ -367,6 +372,7 @@ def train(model: nn.Module,
           train_ds: DataLoader,
           val_ds: DataLoader,
           epochs: int,
+          train_noise: float = 0.0,
           early_stopping_patience: int = 100,
           device: str = 'cpu',
           lr: float = 1e-3,
@@ -395,7 +401,8 @@ def train(model: nn.Module,
     bar = tqdm(range(epochs), total=epochs, desc='Training')
     for epoch in bar:
         train_loss, train_regu_loss = train_step(
-            train_ds, device=device, epoch=epoch, progress=False)
+            train_ds, device=device, epoch=epoch, progress=False,
+            train_noise=train_noise)
         train_losses.append(train_loss)
 
         val_loss, val_regu_loss = val_step(val_ds, device)
@@ -535,6 +542,7 @@ def train_and_evaluate(*,
                        epochs: int = 100,
                        device: str = 'cpu',
                        lr: float = 1e-3,
+                       train_noise: float = 0.0,
                        early_stopping_patience: int = 100,
                        correlation_threshold: float = 0.3,
                        weight_decay: float = 1e-2,
@@ -595,7 +603,8 @@ def train_and_evaluate(*,
                            device=device,
                            lr=lr,
                            weight_decay=weight_decay,
-                           regularization_weight=regularization_weight)
+                           regularization_weight=regularization_weight,
+                           train_noise=train_noise)
 
     # Plot training history.
     fig = plot_train_history(history, epochs=epochs)
@@ -674,7 +683,8 @@ cv_results = cross_validations(
     lr=1e-4,
     early_stopping_patience=100,
     weight_decay=1e-2,
-    regularization_weight=1.0)
+    regularization_weight=1.0,
+    train_noise=0.00)
 
 # %%
 cv_results.describe()
@@ -774,3 +784,75 @@ cv_results.describe()
 # |  50%  | 0.934707  | 0.768421  | 0.068624       | 0.077364           | 0.401148      | 0.307984          |
 # |  75%  | 0.991063  | 0.856719  | 0.143486       | 0.111764           | 0.517706      | 0.411845          |
 # |  max  | 0.994872  | 0.956522  | 0.235547       | 0.186239           | 0.792556      | 0.572658          |
+#
+# * Train noise: 0.0
+#
+# |       |  f1_train |   f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test |
+# |------:|----------:|----------:|---------------:|-------------------:|--------------:|------------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000          | 10.000000     | 10.000000         |
+# |  mean | 0.925390  | 0.761399  | 0.114047       | 0.102715           | 0.392968      | 0.303210          |
+# |  std  | 0.051459  | 0.138520  | 0.074306       | 0.051025           | 0.149052      | 0.131872          |
+# |  min  | 0.863388  | 0.454545  | 0.025461       | 0.025568           | 0.247956      | 0.159256          |
+# |  25%  | 0.882754  | 0.712215  | 0.047980       | 0.054976           | 0.261569      | 0.208438          |
+# |  50%  | 0.917609  | 0.788889  | 0.114155       | 0.115892           | 0.350852      | 0.258403          |
+# |  75%  | 0.966401  | 0.852174  | 0.178983       | 0.140492           | 0.484499      | 0.358687          |
+# |  max  | 1.000000  | 0.909091  | 0.229640       | 0.167953           | 0.637699      | 0.536559          |
+#
+# ---
+# ---
+# * Architecture: 1024 (ReLu, Dropout, LayerNorm) -> 512 (ReLu, Dropout, LayerNorm) -> 64 (LayerNorm, Droput) -> 1
+# * Correlation Threshold: 0.3
+# * LR: 1-4
+# * Weight Decay: 1e-2
+# * Regularization weight: 1.0
+#
+# |       |  f1_train |   f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test |
+# |------:|----------:|----------:|---------------:|-------------------:|--------------:|------------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000          | 10.000000     | 10.000000         |
+# |  mean | 0.915363  | 0.719805  | 0.126651       | 0.111713           | 0.465246      | 0.367487          |
+# |  std  | 0.055941  | 0.105371  | 0.076567       | 0.057464           | 0.178936      | 0.146604          |
+# |  min  | 0.831050  | 0.500000  | 0.027534       | 0.032577           | 0.258689      | 0.207962          |
+# |  25%  | 0.880640  | 0.643939  | 0.059859       | 0.065312           | 0.338920      | 0.265986          |
+# |  50%  | 0.904639  | 0.769841  | 0.129620       | 0.116963           | 0.434503      | 0.319276          |
+# |  75%  | 0.968530  | 0.795652  | 0.171979       | 0.148954           | 0.576692      | 0.463765          |
+# |  max  | 0.984456  | 0.818182  | 0.241858       | 0.195355           | 0.810943      | 0.603020          |
+#
+# ---
+# ---
+# * Architecture: 1024 (ReLu, Dropout, LayerNorm) -> 512 (ReLu, Dropout, LayerNorm) -> 64 (LayerNorm) -> 1
+# * Correlation Threshold: 0.3
+# * LR: 1-4
+# * Train Noise: 0.1
+# * Weight Decay: 1e-2
+# * Regularization weight: 1.0
+#
+# |       |  f1_train |   f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test |
+# |------:|----------:|----------:|---------------:|-------------------:|--------------:|------------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000          | 10.000000     | 10.000000         |
+# |  mean | 0.910933  | 0.756726  | 0.126636       | 0.113645           | 0.469752      | 0.351037          |
+# |  std  | 0.075484  | 0.096224  | 0.099148       | 0.087800           | 0.230167      | 0.169355          |
+# |  min  | 0.797927  | 0.600000  | 0.014958       | 0.018010           | 0.130632      | 0.122560          |
+# |  25%  | 0.854972  | 0.709211  | 0.053874       | 0.034216           | 0.355805      | 0.245166          |
+# |  50%  | 0.911154  | 0.761905  | 0.087230       | 0.102653           | 0.455400      | 0.328301          |
+# |  75%  | 0.981675  | 0.822055  | 0.193842       | 0.178877           | 0.545046      | 0.433651          |
+# |  max  | 1.000000  | 0.909091  | 0.291494       | 0.239619           | 0.972168      | 0.712043          |
+#
+# ---
+# ---
+# * Architecture: 1024 (ReLu, Dropout, LayerNorm) -> 512 (ReLu, Dropout, LayerNorm) -> 64 (LayerNorm) -> 1
+# * Correlation Threshold: 0.3
+# * LR: 1-4
+# * Train Noise: 0.01
+# * Weight Decay: 1e-2
+# * Regularization weight: 1.0
+#
+# |       |  f1_train |   f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test |
+# |------:|----------:|----------:|---------------:|-------------------:|--------------:|------------------:|
+# | count | 10.000000 | 10.000000 | 10.000000      | 10.000000          | 10.000000     | 10.000000         |
+# |  mean | 0.912129  | 0.738721  | 0.123202       | 0.110247           | 0.456864      | 0.354187          |
+# |  std  | 0.052634  | 0.114834  | 0.074895       | 0.051595           | 0.204676      | 0.165713          |
+# |  min  | 0.849741  | 0.583333  | 0.024473       | 0.038642           | 0.169423      | 0.130206          |
+# |  25%  | 0.863509  | 0.623913  | 0.065739       | 0.079485           | 0.295615      | 0.233858          |
+# |  50%  | 0.915841  | 0.761905  | 0.108148       | 0.102719           | 0.413764      | 0.310698          |
+# |  75%  | 0.950533  | 0.813636  | 0.187869       | 0.137312           | 0.627799      | 0.460436          |
+# |  max  | 0.984456  | 0.909091  | 0.237448       | 0.196157           | 0.783205      | 0.666412          |
