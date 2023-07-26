@@ -366,6 +366,7 @@ def train(model: nn.Module,
           epochs: int,
           early_stopping_patience: int = 10,
           device: str = 'cpu',
+          lr: float = 1e-3,
           weight_decay: float = 1e-2,
           regularization_weight: float = 1.0):
     def save_checkpoint(model, path):
@@ -379,6 +380,7 @@ def train(model: nn.Module,
 
     train_step, val_step = create_training_and_evaluation_step(
         model,
+        lr=lr,
         weight_decay=weight_decay,
         regularization_weight=regularization_weight)
     train_losses = []
@@ -498,6 +500,7 @@ def train_and_evaluate(*,
                        Xte, gte, yte,
                        epochs: int = 100,
                        device: str = 'cpu',
+                       lr: float = 1e-3,
                        correlation_threshold: float = 0.3,
                        weight_decay: float = 1e-2,
                        regularization_weight: float = 1.0):
@@ -555,6 +558,7 @@ def train_and_evaluate(*,
                   epochs=400,
                   early_stopping_patience=10,
                   device=device,
+                  lr=lr,
                   weight_decay=weight_decay,
                   regularization_weight=regularization_weight)
 
@@ -627,6 +631,7 @@ cv_results = cross_validations(
     n_folds=10,
     epochs=400,
     correlation_threshold=0.3,
+    lr=1e-3,
     weight_decay=1e-2,
     regularization_weight=1.0)
 
@@ -634,7 +639,7 @@ cv_results = cross_validations(
 cv_results.describe()
 
 # %% [markdown]
-# * Without optimal prob estimation: (first hidden layer = 2048 -> 512 -> 64 -> 1), correlation_threshold=0.3:
+# * Without optimal prob estimation: (first hidden layer = 2048 -> 512 -> 64 -> 1), correlation_threshold=0.3, lr=1e-3:
 #
 # |       |  f1_train |   f1_test | log_loss_train | log_loss_test |
 # |------:|----------:|----------:|---------------:|--------------:|
