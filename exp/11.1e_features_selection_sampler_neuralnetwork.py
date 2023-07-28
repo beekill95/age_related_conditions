@@ -14,15 +14,17 @@
 # ---
 
 # %%
+from dataclasses import dataclass
 from imblearn.over_sampling import SMOTENC
 import matplotlib.pyplot as plt
 import numpy as np
-import numpyro
+import operator
 import pandas as pd
 import seaborn as sns
 from scipy.cluster import hierarchy
 from scipy.spatial.distance import squareform
 from scipy.stats import bernoulli
+from sklearn.base import clone
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.feature_selection import SelectFromModel
@@ -36,10 +38,6 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 from typing import Literal
-
-
-numpyro.set_platform('cpu')
-numpyro.set_host_device_count(16)
 
 # %%
 kaggle_submission = False
@@ -114,7 +112,7 @@ def create_interaction_terms_between(df: pd.DataFrame, features: list[str]):
 def create_quadratic_terms(df: pd.DataFrame, features: list[str]):
     assert all(f in df.columns for f in features)
 
-    return X_df[features].pow(2.).rename(columns={
+    return df[features].pow(2.).rename(columns={
         f: f'{f}^2' for f in features
     })
 
@@ -467,7 +465,7 @@ def sampling(X, y):
 # %% [markdown]
 # ### Cross Validation
 
-# %% jupyter={"outputs_hidden": true}
+# %%
 def balanced_log_loss(y_true, pred_prob):
     nb_class_0 = np.sum(1 - y_true)
     nb_class_1 = np.sum(y_true)
@@ -536,17 +534,26 @@ def plot_train_history(history: dict, epochs: int):
     return fig
 
 
-def train_and_evaluate(*,
-                       Xtr, gtr, ytr,
-                       Xte, gte, yte,
-                       epochs: int = 100,
-                       device: str = 'cpu',
-                       lr: float = 1e-3,
-                       train_noise: float = 0.0,
-                       early_stopping_patience: int = 100,
-                       correlation_threshold: float = 0.3,
-                       weight_decay: float = 1e-2,
-                       regularization_weight: float = 1.0):
+@dataclass
+class TrainAndEvaluateResult:
+    model: NNClassifier
+    features: list[str]
+    preprocessing: Pipeline
+    metrics: dict
+
+
+def train_and_evaluate(
+    *, Xtr, gtr, ytr,
+        Xte, gte, yte,
+        preprocessing: Pipeline,
+        epochs: int = 100,
+        device: str = 'cpu',
+        lr: float = 1e-3,
+        train_noise: float = 0.0,
+        early_stopping_patience: int = 100,
+        correlation_threshold: float = 0.3,
+        weight_decay: float = 1e-2,
+        regularization_weight: float = 1.0) -> TrainAndEvaluateResult:
     # First, we will normalize the data.
     Xtr = pd.DataFrame(
         preprocessing.fit_transform(Xtr, ytr),
@@ -558,7 +565,8 @@ def train_and_evaluate(*,
     # Next, we'll filter out correlated features.
     Xtr = filter_in_uncorrelated_features(
         Xtr, correlation_threshold=correlation_threshold)
-    Xte = Xte[Xtr.columns]
+    uncorrelated_features = Xtr.columns.tolist()
+    Xte = Xte[uncorrelated_features]
 
     # Store original training dataset.
     Xtr_orig = Xtr.copy()
@@ -608,9 +616,9 @@ def train_and_evaluate(*,
                            train_noise=train_noise)
 
     # Plot training history.
-    fig = plot_train_history(history, epochs=epochs)
-    plt.show()
-    plt.close(fig)
+    # fig = plot_train_history(history, epochs=epochs)
+    # plt.show()
+    # plt.close(fig)
 
     # Evaluate the model.
     ytr_prob = (model(
@@ -641,24 +649,45 @@ def train_and_evaluate(*,
           f'precision={precision_test:.4f} log-loss={log_loss_test:.4f} '
           f'opt-log-loss={opt_log_loss_test:.4f}')
 
-    return dict(
-        f1_train=f1_train,
-        f1_test=f1_test,
-        log_loss_train=log_loss_train,
-        opt_log_loss_train=opt_log_loss_train,
-        log_loss_test=log_loss_test,
-        opt_log_loss_test=opt_log_loss_test,
-    )
+    return TrainAndEvaluateResult(
+        model=model,
+        features=uncorrelated_features,
+        preprocessing=preprocessing,
+        metrics=dict(f1_train=f1_train,
+                     f1_test=f1_test,
+                     log_loss_train=log_loss_train,
+                     opt_log_loss_train=opt_log_loss_train,
+                     log_loss_test=log_loss_test,
+                     opt_log_loss_test=opt_log_loss_test,
+                     ))
 
 
-def cross_validations(*, X, grp, y,
-                      n_folds: int = 10,
-                      repeats_per_fold: int = 1,
-                      **kwargs):
-    results = []
+@dataclass
+class TrainingResult:
+    model: NNClassifier
+    features: list[str]
+    preprocessing: Pipeline
+    performance: float
+
+
+def cross_validations(
+    *, X, grp, y,
+        n_folds: int = 10,
+        repeats_per_fold: int = 1,
+        keep_best_in_fold_method: str = 'f1_test',
+        **kwargs):
+    assert keep_best_in_fold_method in ['f1_test', 'opt_log_loss_test']
+
+    metrics = []
+    best_models: list[TrainingResult] = []
 
     kfolds = StratifiedKFold(n_splits=n_folds)
     for fold, (train_idx, test_idx) in enumerate(kfolds.split(X, y)):
+        best_model_metric = (0.0
+                             if keep_best_in_fold_method == 'f1_test'
+                             else np.inf)
+        best_model = None
+
         for repeat in range(repeats_per_fold):
             print(f'\n-- Fold # {fold + 1}/{n_folds} - '
                   f'Repeat #{repeat + 1}/{repeats_per_fold}:')
@@ -672,26 +701,47 @@ def cross_validations(*, X, grp, y,
                 Xte=Xte, gte=gte, yte=yte,
                 **kwargs)
 
-            result['fold'] = fold + 1
-            result['repeat'] = repeat + 1
-            results.append(result)
+            metric = result.metrics
+            metric['fold'] = fold + 1
+            metric['repeat'] = repeat + 1
+            metrics.append(metric)
 
-    return pd.DataFrame(results)
+            # Compare the model's metric and retain the best model.
+            op = (operator.gt
+                  if keep_best_in_fold_method == 'f1_test'
+                  else operator.lt)
+            if op(metric[keep_best_in_fold_method], best_model_metric):
+                best_model_metric = metric[keep_best_in_fold_method]
+                best_model = TrainingResult(
+                    model=result.model,
+                    features=result.features,
+                    preprocessing=result.preprocessing,
+                    performance=best_model_metric,
+                )
+
+        # Store the result.
+        best_models.append(best_model)
+
+    return pd.DataFrame(metrics), best_models
 
 
-cv_results = cross_validations(
+keep_best_in_fold_method = 'f1_test'
+cv_results, models = cross_validations(
     X=Xtrain_df,
     grp=ej.cat.codes.values,
     y=y,
+    preprocessing=clone(preprocessing),
+    keep_best_in_fold_method=keep_best_in_fold_method,
     n_folds=10,
-    repeats_per_fold=10,
+    repeats_per_fold=2,
+    device='cuda' if torch.cuda.is_available() else 'cpu',
     epochs=2000,
     correlation_threshold=0.3,
     lr=1e-4,
     early_stopping_patience=100,
     weight_decay=1e-2,
     regularization_weight=1.0,
-    train_noise=0.00)
+    train_noise=0.01)
 
 
 # %%
@@ -742,11 +792,98 @@ cv_results_optimal_log_loss_test.describe()
 # %% [markdown]
 # ### Discussions
 #
-# From the results above,
-# we see the common trend of the model is that:
+# Decrease the noise from 0.1 to 0.01 seems to help the CV scores
+# in term of f1 score and log loss score.
+# However, there is a slight decrease in the log loss score in the `opt_log_loss_test` case.
 #
-# * Out of 10 folds, there are 8 folds in which the model overfit the dataset;
-# * And the remaining two folds, the model underfit the trainining.
+# In term of overfitting and underfitting,
+# we have:
+#
+# * Fold #4 and #5 have very good score in both training and testing.
+# * Fold #6 and #7 are both underfitting and overfitting.
+# The two folds are the worst score we have.
+# * Fold #9 is weird: the f1 score is very good but the log_loss score is terrible.
+
+
+# %% [markdown]
+# ## Classification on Test Data
+
+# %%
+def predict_proba_on_test_data(
+        models: list[TrainingResult], *,
+        Xte: pd.DataFrame,
+        gte: np.ndarray,
+        keep_best_in_fold_method: str,
+        device: str,
+        nb_samples_for_best_model: int = 20000):
+    assert keep_best_in_fold_method in ['f1_test', 'opt_log_loss_test']
+
+    # Calculate the number of samples to take for each model.
+    performances = np.asarray([m.performance for m in models])
+    # Scale the performance metrics to 0. and 1. range.
+    minperf = np.min(performances)
+    maxperf = np.max(performances)
+    performances = (performances - minperf) / (maxperf - minperf)
+    # If we're dealing with `opt_log_loss_test`,
+    # invert it by subtracting 1.
+    if keep_best_in_fold_method == 'opt_log_loss_test':
+        performances = 1. - performances
+
+    model_samples = np.round(
+        nb_samples_for_best_model * performances).astype(np.int32)
+
+    y_samples = []
+    for model, samples in zip(models, model_samples):
+        # Process data.
+        Xte_processed = pd.DataFrame(
+            model.preprocessing.transform(Xte),
+            columns=Xte.columns,
+        )[model.features]
+        Xte_processed['ej'] = gte
+
+        # Predict probability.
+        y_prob = (
+            model.model(
+                torch.tensor(Xte_processed.values,
+                             dtype=torch.float32).to(device))
+            .cpu().detach().numpy().squeeze())
+
+        # Generate samples.
+        ys = bernoulli.rvs(y_prob[:, None], size=(y_prob.shape[0], samples))
+        y_samples.append(ys.T)
+
+    # Concatenate these samples, and provide the optimal estimation.
+    y_samples = np.concatenate(y_samples, axis=0)
+    return calculate_optimal_prob_prediction(y_samples)
+
+
+# Process test data.
+Xte_df = test_df.drop(columns=['Id', 'EJ'])
+ej_test = test_df['EJ'].astype('category')
+
+Xte_df = pd.DataFrame(
+    imputer.transform(Xte_df),
+    columns=Xte_df.columns,
+    index=Xte_df.index)
+Xteinteractions_df = create_interaction_terms_between(Xte_df, Xte_df.columns)
+Xte2_df = create_quadratic_terms(Xte_df, Xte_df.columns)
+
+Xtest_df = pd.concat([Xte_df, Xteinteractions_df, Xte2_df], axis=1)
+yte_prob_pred = predict_proba_on_test_data(
+    models,
+    Xte=Xtest_df,
+    gte=ej_test.cat.codes.values,
+    keep_best_in_fold_method=keep_best_in_fold_method,
+    device='cuda' if torch.cuda.is_available() else 'cpu',
+    nb_samples_for_best_model=20000)
+
+# Create submission file.
+submission = pd.DataFrame({
+    'Id': test_df['Id'],
+    'class_0': 1. - yte_prob_pred,
+    'class_1': yte_prob_pred,
+})
+submission.to_csv('submission.csv')
 
 # %% [markdown]
 # # Results Overview
