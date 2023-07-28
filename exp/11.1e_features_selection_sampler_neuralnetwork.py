@@ -883,7 +883,7 @@ submission = pd.DataFrame({
     'class_0': 1. - yte_prob_pred,
     'class_1': yte_prob_pred,
 })
-submission.to_csv('submission.csv')
+submission.to_csv('submission.csv', index=False)
 
 # %% [markdown]
 # # Results Overview
