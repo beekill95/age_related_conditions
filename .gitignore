@@ -172,3 +172,4 @@ submission.csv
 
 # Pytorch's models' checkpoints.
 *.pth
+*.model
