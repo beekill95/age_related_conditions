@@ -15,11 +15,13 @@
 
 # %%
 from dataclasses import dataclass
+from datetime import datetime
 from imblearn.over_sampling import SMOTENC
 import matplotlib.pyplot as plt
 import numpy as np
 import operator
 import pandas as pd
+import pickle
 import seaborn as sns
 from scipy.cluster import hierarchy
 from scipy.spatial.distance import squareform
@@ -788,6 +790,14 @@ cv_results_optimal_log_loss_test
 
 # %%
 cv_results_optimal_log_loss_test.describe()
+
+# %%
+# Save models for later use.
+date = datetime.now().strftime('%Y%m%d_%H_%M')
+prefix = '11.1e'
+output_fn = f'{date}_{prefix}.model'
+with open(output_fn, 'wb') as out:
+    pickle.dump(models, out, protocol=pickle.DEFAULT_PROTOCOL)
 
 # %% [markdown]
 # ### Discussions
