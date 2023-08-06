@@ -173,3 +173,6 @@ submission.csv
 # Pytorch's models' checkpoints.
 *.pth
 *.model
+
+# Tensorboard logs.
+tensorboard_logs/
