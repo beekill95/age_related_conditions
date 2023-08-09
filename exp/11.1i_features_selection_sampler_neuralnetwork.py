@@ -298,14 +298,36 @@ def calc_triplet_loss(x: torch.Tensor, y: torch.Tensor,
 
     # Calculate pairwise distances.
     pairwise_distances = calc_pairwise_distances(x)
-    positive_distances = torch.where(
-        positive_mask, pairwise_distances, 0.)
-    negative_distances = torch.where(
-        ~positive_mask, pairwise_distances, torch.inf)
+    # -- OPTION #1:
+    # positive_distances = torch.where(
+    #     positive_mask, pairwise_distances, 0.0)
+    # negative_distances = torch.where(
+    #     ~positive_mask, pairwise_distances, torch.inf)
+    # # The largest/smallest positive/negative distances.
+    # largest_positive_distances, _ = torch.max(positive_distances, axis=0)
+    # smallest_negative_distances, _ = torch.min(negative_distances, axis=0)
+    # losses = largest_positive_distances - smallest_negative_distances + margin
 
-    # The largest/smallest positive/negative distances.
-    largest_positive_distances, _ = torch.max(positive_distances, axis=0)
-    smallest_negative_distances, _ = torch.min(negative_distances, axis=0)
+    # -- OPTION #2:
+    # positive_distances = torch.where(
+    #     positive_mask, pairwise_distances, float('nan'))
+    # negative_distances = torch.where(
+    #     ~positive_mask, pairwise_distances, float('nan'))
+    # avg_positive_distances = torch.nanmean(positive_distances, axis=0)
+    # avg_negative_distances = torch.nanmean(negative_distances, axis=0)
+    # losses = avg_positive_distances - avg_negative_distances + margin
+
+    # -- OPTION #3:
+    positive_distances = torch.where(
+        positive_mask, pairwise_distances, float('nan'))
+    avg_positive_distances = torch.nanmean(positive_distances, axis=0)
+    negative_distances = torch.where(
+        ~positive_mask, pairwise_distances, float('nan'))
+    smallest_negative_distances, _ = torch.topk(
+        negative_distances, k=5, dim=0, largest=False)
+    avg_negative_distances = torch.nanmean(smallest_negative_distances)
+    losses = avg_positive_distances - avg_negative_distances + margin
+
     # largest_positive_distances, _ = torch.max(
     #     pairwise_distances[positive_mask], axis=0)
     # smallest_negative_distances, _ = torch.min(
@@ -318,15 +340,24 @@ def calc_triplet_loss(x: torch.Tensor, y: torch.Tensor,
     # print('smallest negative', smallest_negative_distances)
 
     # Calculate the triplet loss.
-    losses = largest_positive_distances - smallest_negative_distances + margin
+    # losses = largest_positive_distances - smallest_negative_distances + margin
+    # losses = avg_positive_distances - avg_negative_distances + margin
     # print('triplet losses', losses)
     losses = torch.max(losses, torch.zeros_like(losses))
     # losses, _ = torch.topk(losses, k=topk, largest=True, sorted=False)
     # Only positive losses.
-    losses = losses[torch.squeeze(y) == 1]
+    pos_mask = torch.squeeze(y) == 1
+    positive_losses = losses[pos_mask]
+    # print('Number of positive samples:', torch.sum(pos_mask))
+    # print('Number of negative samples:', torch.sum(~pos_mask))
+    try:
+        negative_losses, _ = torch.topk(
+            losses[~pos_mask], k=topk, largest=True, sorted=False)
+    except RuntimeError:
+        negative_losses = losses[~pos_mask]
     # print('Number of positives: ', y.sum())
     # losses, _ = torch.topk(losses, k=topk, largest=True, sorted=False)
-    return torch.mean(losses**2)
+    return torch.mean(positive_losses) + torch.mean(negative_losses)
 
 
 # %%
@@ -842,7 +873,7 @@ cv_results, models = cross_validations(
     preprocessing=clone(preprocessing),
     keep_best_in_fold_method=keep_best_in_fold_method,
     n_folds=10,
-    repeats_per_fold=2,
+    repeats_per_fold=5,
     device='cuda' if torch.cuda.is_available() else 'cpu',
     epochs=2000,
     correlation_threshold=0.3,
@@ -850,9 +881,9 @@ cv_results, models = cross_validations(
     early_stopping_patience=100,
     weight_decay=1e-2,
     # regularization_weight=1.0,
-    regularization_weight=1.0,
-    triplet_loss_weight=1.0,
-    triplet_loss_topk=10,
+    regularization_weight=0.0,
+    triplet_loss_weight=0.5,
+    triplet_loss_topk=5,
     train_noise=0.01)
 
 
@@ -907,6 +938,7 @@ date = datetime.now().strftime('%Y%m%d_%H_%M')
 prefix = '11.1i'
 output_fn = f'{date}_{prefix}.model'
 with open(output_fn, 'wb') as out:
+    print(f'Saving models to: {output_fn=}')
     pickle.dump(models, out, protocol=pickle.DEFAULT_PROTOCOL)
 
 # %% [markdown]
