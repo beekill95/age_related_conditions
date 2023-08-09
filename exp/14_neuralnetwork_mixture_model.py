@@ -853,12 +853,18 @@ writer = SummaryWriter(log_dir)
 print(f'Tensorboard at: {log_dir}')
 train_evaluate_kwargs = dict(
     n_folds=10,
-    repeats_per_fold=5,
+    repeats_per_fold=10 if kaggle_submission else 5,
     epochs=2000,
-    correlation_threshold=0.3,
+    # correlation_threshold=0.3,
+    # correlation_threshold=0.4,
+    # correlation_threshold=0.2,
+    correlation_threshold=0.1,
     lr=1e-4,
     early_stopping_patience=100,
-    weight_decay=1e-2,
+    # weight_decay=1e-2,
+    # weight_decay=1e-1,
+    weight_decay=1.0,
+    # weight_decay=5.0,
     # train_noise=0.01,
     train_noise=0.0,
     loss_weights=dict(
@@ -936,6 +942,87 @@ cv_results_optimal_log_loss_test
 # %%
 cv_results_optimal_log_loss_test.describe()
 
+
+# %% [markdown]
+# ## Classification on Test Data
+
+# %%
+def predict_proba_on_test_data(
+        models: list[TrainingResult], *,
+        Xte: pd.DataFrame,
+        gte: np.ndarray,
+        keep_best_in_fold_method: str,
+        device: str,
+        nb_samples_for_best_model: int = 20000):
+    assert keep_best_in_fold_method in ['f1_test', 'opt_log_loss_test']
+
+    # Calculate the number of samples to take for each model.
+    performances = np.asarray([m.performance for m in models])
+    # Scale the performance metrics to 0. and 1. range.
+    minperf = np.min(performances)
+    maxperf = np.max(performances)
+    performances = (performances - minperf) / (maxperf - minperf)
+    # If we're dealing with `opt_log_loss_test`,
+    # invert it by subtracting 1.
+    if keep_best_in_fold_method == 'opt_log_loss_test':
+        performances = 1. - performances
+
+    model_samples = np.round(
+        nb_samples_for_best_model * performances).astype(np.int32)
+
+    y_samples = []
+    for model, samples in zip(models, model_samples):
+        # Process data.
+        Xte_processed = pd.DataFrame(
+            model.preprocessing.transform(Xte),
+            columns=Xte.columns,
+        )[model.features]
+        Xte_processed['ej'] = gte
+
+        # Predict probability.
+        y_prob = (
+            model.model(
+                torch.tensor(Xte_processed.values,
+                             dtype=torch.float32).to(device))
+            .cpu().detach().numpy().squeeze())
+
+        # Generate samples.
+        ys = bernoulli.rvs(y_prob[:, None], size=(y_prob.shape[0], samples))
+        y_samples.append(ys.T)
+
+    # Concatenate these samples, and provide the optimal estimation.
+    y_samples = np.concatenate(y_samples, axis=0)
+    return calculate_optimal_prob_prediction(y_samples)
+
+
+# Process test data.
+Xte_df = test_df.drop(columns=['Id', 'EJ'])
+ej_test = test_df['EJ'].astype('category')
+
+Xte_df = pd.DataFrame(
+    imputer.transform(Xte_df),
+    columns=Xte_df.columns,
+    index=Xte_df.index)
+Xteinteractions_df = create_interaction_terms_between(Xte_df, Xte_df.columns)
+Xte2_df = create_quadratic_terms(Xte_df, Xte_df.columns)
+
+Xtest_df = pd.concat([Xte_df, Xteinteractions_df, Xte2_df], axis=1)
+yte_prob_pred = predict_proba_on_test_data(
+    models,
+    Xte=Xtest_df,
+    gte=ej_test.cat.codes.values,
+    keep_best_in_fold_method=keep_best_in_fold_method,
+    device='cuda' if torch.cuda.is_available() else 'cpu',
+    nb_samples_for_best_model=20000)
+
+# Create submission file.
+submission = pd.DataFrame({
+    'Id': test_df['Id'],
+    'class_0': 1. - yte_prob_pred,
+    'class_1': yte_prob_pred,
+})
+submission.to_csv('submission.csv', index=False)
+
 # %% [markdown]
 # # Results Records
 #
@@ -998,3 +1085,176 @@ cv_results_optimal_log_loss_test.describe()
 # | 1 | 0.994872 | 0.700000 | 0.005919       | 0.015777           | 0.657027      | 0.482378          | 6.0  | 3.0    |
 # | 2 | 0.989691 | 0.476190 | 0.029500       | 0.053289           | 0.727115      | 0.554656          | 7.0  | 4.0    |
 # | 3 | 1.000000 | 0.695652 | 0.002594       | 0.006415           | 0.489272      | 0.426375          | 9.0  | 5.0    |
+#
+# ### Weight Decay = 0.1, Corr Thres = 0.3
+# Tensorboard at: ../tensorboard_logs/20230809_12_04_14_nn_gaussian_mixture
+#
+# F1
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.818182 | 0.035019       | 0.070561           | 0.321953      | 0.258688          | 1.0  | 3.0    |
+# | 1 | 1.0      | 0.777778 | 0.030226       | 0.065769           | 0.547368      | 0.362426          | 6.0  | 3.0    |
+# | 2 | 1.0      | 0.526316 | 0.044081       | 0.091816           | 0.640098      | 0.495752          | 7.0  | 1.0    |
+# | 3 | 1.0      | 0.947368 | 0.029372       | 0.058026           | 0.239100      | 0.198931          | 9.0  | 1.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.818182 | 0.035019       | 0.070561           | 0.321953      | 0.258688          | 1.0  | 3.0    |
+# | 1 | 1.0      | 0.777778 | 0.030226       | 0.065769           | 0.547368      | 0.362426          | 6.0  | 3.0    |
+# | 2 | 1.0      | 0.526316 | 0.049874       | 0.093746           | 0.610092      | 0.473863          | 7.0  | 4.0    |
+# | 3 | 1.0      | 0.900000 | 0.027893       | 0.061741           | 0.212797      | 0.188283          | 9.0  | 2.0    |
+#
+# __Discussion__:
+#
+# * This is the first time that we achieve such a good score at fold #9 in both the f1_test and log_loss.
+# * Also, for the `opt_log_loss` for fold #6 and fold #7 seems to improve as well.
+#
+# ### Weight Decay = 1.0, Corr Thres = 0.3
+# Tensorboard at: ../tensorboard_logs/20230809_12_22_14_nn_gaussian_mixture
+#
+# F1
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.965174 | 0.900000 | 0.185601       | 0.245201           | 0.315447      | 0.327466          | 1.0  | 1.0    |
+# | 1 | 0.984772 | 0.900000 | 0.151755       | 0.213402           | 0.330412      | 0.329998          | 6.0  | 1.0    |
+# | 2 | 0.974359 | 0.761905 | 0.162484       | 0.226929           | 0.477779      | 0.453242          | 7.0  | 1.0    |
+# | 3 | 0.994872 | 0.947368 | 0.159445       | 0.218124           | 0.247456      | 0.280937          | 9.0  | 1.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.000000 | 0.857143 | 0.149384       | 0.212518           | 0.269886      | 0.294577          | 1.0  | 3.0    |
+# | 1 | 0.984772 | 0.900000 | 0.151755       | 0.213402           | 0.330412      | 0.329998          | 6.0  | 1.0    |
+# | 2 | 0.994872 | 0.736842 | 0.128913       | 0.190339           | 0.513598      | 0.446905          | 7.0  | 4.0    |
+# | 3 | 1.000000 | 0.947368 | 0.134264       | 0.195257           | 0.234923      | 0.263929          | 9.0  | 2.0    |
+#
+# ### Weight Decay = 5.0, Corr Thres = 0.3
+# Tensorboard at: ../tensorboard_logs/20230809_13_35_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.979592 | 0.952381 | 0.388569       | 0.412716           | 0.429112      | 0.442147          | 1.0  | 5.0    |
+# | 1 | 1.000000 | 0.857143 | 0.329953       | 0.360076           | 0.466630      | 0.461789          | 6.0  | 1.0    |
+# | 2 | 0.994819 | 0.666667 | 0.341663       | 0.373269           | 0.506038      | 0.502840          | 7.0  | 4.0    |
+# | 3 | 1.000000 | 0.947368 | 0.281874       | 0.317959           | 0.359686      | 0.376789          | 9.0  | 4.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.989691 | 0.782609 | 0.260499       | 0.307647           | 0.371765      | 0.390849          | 1.0  | 3.0    |
+# | 1 | 0.989691 | 0.736842 | 0.290795       | 0.331369           | 0.453950      | 0.452723          | 6.0  | 2.0    |
+# | 2 | 0.984293 | 0.625000 | 0.239241       | 0.280439           | 0.578064      | 0.500171          | 7.0  | 1.0    |
+# | 3 | 1.000000 | 0.947368 | 0.281874       | 0.317959           | 0.359686      | 0.376789          | 9.0  | 4.0    |
+#
+# ### Weight Decay = 0.1, Corr Thres = 0.4
+# Tensorboard at: ../tensorboard_logs/20230809_13_57_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.800000 | 0.027469       | 0.060083           | 0.368900      | 0.279844          | 1.0  | 5.0    |
+# | 1 | 1.0      | 0.842105 | 0.035672       | 0.072949           | 0.502266      | 0.351984          | 6.0  | 3.0    |
+# | 2 | 1.0      | 0.588235 | 0.057298       | 0.097015           | 0.620840      | 0.441438          | 7.0  | 4.0    |
+# | 3 | 1.0      | 0.947368 | 0.023143       | 0.049591           | 0.212033      | 0.171106          | 9.0  | 2.0    |
+#
+# Optimal Log Loss
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.700000 | 0.040618       | 0.082387           | 0.307729      | 0.254648          | 1.0  | 3.0    |
+# | 1 | 1.0      | 0.842105 | 0.035672       | 0.072949           | 0.502266      | 0.351984          | 6.0  | 3.0    |
+# | 2 | 1.0      | 0.588235 | 0.057298       | 0.097015           | 0.620840      | 0.441438          | 7.0  | 4.0    |
+# | 3 | 1.0      | 0.947368 | 0.023143       | 0.049591           | 0.212033      | 0.171106          | 9.0  | 2.0    |
+#
+# ### Weight Decay = 0.1, Corr Thres = 0.2
+# Tensorboard at: ../tensorboard_logs/20230809_14_15_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.952381 | 0.020093       | 0.049454           | 0.164131      | 0.114920          | 1.0  | 1.0    |
+# | 1 | 1.0      | 0.800000 | 0.028273       | 0.061398           | 0.506244      | 0.376267          | 6.0  | 2.0    |
+# | 2 | 1.0      | 0.600000 | 0.039291       | 0.083834           | 0.568878      | 0.438837          | 7.0  | 3.0    |
+# | 3 | 1.0      | 0.947368 | 0.024993       | 0.052042           | 0.214000      | 0.178153          | 9.0  | 1.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.0      | 0.952381 | 0.020093       | 0.049454           | 0.164131      | 0.114920          | 1.0  | 1.0    |
+# | 1 | 1.0      | 0.800000 | 0.028273       | 0.061398           | 0.506244      | 0.376267          | 6.0  | 2.0    |
+# | 2 | 1.0      | 0.600000 | 0.039291       | 0.083834           | 0.568878      | 0.438837          | 7.0  | 3.0    |
+# | 3 | 1.0      | 0.947368 | 0.023459       | 0.050256           | 0.212189      | 0.176139          | 9.0  | 2.0    |
+#
+# ### Weight Decay = 1.0, Corr Thres = 0.2
+# Tensorboard at: ../tensorboard_logs/20230809_14_31_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.989796 | 0.952381 | 0.166487       | 0.228699           | 0.244899      | 0.278115          | 1.0  | 1.0    |
+# | 1 | 1.000000 | 0.842105 | 0.141038       | 0.204665           | 0.403222      | 0.374458          | 6.0  | 2.0    |
+# | 2 | 0.994872 | 0.800000 | 0.136324       | 0.199293           | 0.414038      | 0.394909          | 7.0  | 2.0    |
+# | 3 | 0.994924 | 0.947368 | 0.134725       | 0.192662           | 0.237671      | 0.262875          | 9.0  | 2.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 1.000000 | 0.952381 | 0.152249       | 0.214344           | 0.243766      | 0.270935          | 1.0  | 5.0    |
+# | 1 | 1.000000 | 0.842105 | 0.141038       | 0.204665           | 0.403222      | 0.374458          | 6.0  | 2.0    |
+# | 2 | 0.994872 | 0.800000 | 0.136324       | 0.199293           | 0.414038      | 0.394909          | 7.0  | 2.0    |
+# | 3 | 0.994924 | 0.947368 | 0.134725       | 0.192662           | 0.237671      | 0.262875          | 9.0  | 2.0    |
+#
+# ### Weight Decay = 0.1, Corr Thres = 0.1
+# Tensorboard at: ../tensorboard_logs/20230809_14_54_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.994872 | 0.952381 | 0.026742       | 0.056464           | 0.204202      | 0.169145          | 1.0  | 2.0    |
+# | 1 | 1.000000 | 0.800000 | 0.027252       | 0.060239           | 0.438999      | 0.338644          | 6.0  | 2.0    |
+# | 2 | 1.000000 | 0.600000 | 0.038588       | 0.078352           | 0.621588      | 0.481142          | 7.0  | 1.0    |
+# | 3 | 1.000000 | 0.947368 | 0.027154       | 0.058534           | 0.220273      | 0.200940          | 9.0  | 2.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.994872 | 0.900000 | 0.030215       | 0.065993           | 0.212759      | 0.167518          | 1.0  | 1.0    |
+# | 1 | 1.000000 | 0.800000 | 0.027252       | 0.060239           | 0.438999      | 0.338644          | 6.0  | 2.0    |
+# | 2 | 1.000000 | 0.526316 | 0.039198       | 0.079391           | 0.649793      | 0.476517          | 7.0  | 3.0    |
+# | 3 | 1.000000 | 0.947368 | 0.026615       | 0.057651           | 0.205957      | 0.177540          | 9.0  | 4.0    |
+#
+# ### Weight Decay = 1.0, Corr Thres = 0.1
+# Tensorboard at: ../tensorboard_logs/20230809_15_11_14_nn_gaussian_mixture
+#
+# F1:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.984772 | 1.000000 | 0.138962       | 0.203022           | 0.156573      | 0.208315          | 1.0  | 3.0    |
+# | 1 | 0.989796 | 0.818182 | 0.141513       | 0.203881           | 0.352958      | 0.352863          | 6.0  | 3.0    |
+# | 2 | 1.000000 | 0.761905 | 0.150319       | 0.214389           | 0.453442      | 0.436434          | 7.0  | 4.0    |
+# | 3 | 1.000000 | 0.947368 | 0.188050       | 0.246507           | 0.268678      | 0.303564          | 9.0  | 1.0    |
+#
+# Optimal Log Loss:
+#
+# |   | f1_train |  f1_test | log_loss_train | opt_log_loss_train | log_loss_test | opt_log_loss_test | fold | repeat |
+# |--:|---------:|---------:|---------------:|-------------------:|--------------:|------------------:|-----:|-------:|
+# | 0 | 0.984772 | 1.000000 | 0.138962       | 0.203022           | 0.156573      | 0.208315          | 1.0  | 3.0    |
+# | 1 | 0.989796 | 0.818182 | 0.141513       | 0.203881           | 0.352958      | 0.352863          | 6.0  | 3.0    |
+# | 2 | 1.000000 | 0.761905 | 0.150319       | 0.214389           | 0.453442      | 0.436434          | 7.0  | 4.0    |
+# | 3 | 1.000000 | 0.947368 | 0.149595       | 0.211691           | 0.243417      | 0.279916          | 9.0  | 2.0    |
