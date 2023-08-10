@@ -130,59 +130,58 @@ Xtrain_df = pd.concat([X_df, Xinteractions_df, X2_df], axis=1)
 # ### Correlations Removal
 
 # %%
-corr = Xtrain_df.corr('spearman')
+# corr = Xtrain_df.corr('spearman')
 
-fig, ax = plt.subplots()
-cs = ax.pcolormesh(corr.abs())
-fig.colorbar(cs, ax=ax)
-fig.tight_layout()
+# fig, ax = plt.subplots()
+# cs = ax.pcolormesh(corr.abs())
+# fig.colorbar(cs, ax=ax)
+# fig.tight_layout()
 
 # %%
 # Convert the correlation matrix into dissimilarity matrix,
 # to be used with MDS.
-distance = 1. - np.abs(corr)
-mds = MDS(n_components=2, dissimilarity='precomputed')
-embeddings = mds.fit_transform(distance)
+# distance = 1. - np.abs(corr)
+# mds = MDS(n_components=2, dissimilarity='precomputed')
+# embeddings = mds.fit_transform(distance)
 
-# Show the results.
-sns.scatterplot(x=embeddings[:, 0], y=embeddings[:, 1])
+# # Show the results.
+# sns.scatterplot(x=embeddings[:, 0], y=embeddings[:, 1])
 
 # %%
 # Now, we can use clustering on the MDS's result
 # to identify the clusters.
 # clustering = DBSCAN(eps=0.1, min_samples=2, metric='precomputed')
 # clusters = clustering.fit_predict(distance)
-dist_linkage = hierarchy.ward(squareform(distance))
-clusters = hierarchy.fcluster(dist_linkage, 0.3, criterion='distance')
-unique_clusters = list(np.unique(clusters))
-print(f'Clusters: {unique_clusters}')
+# dist_linkage = hierarchy.ward(squareform(distance))
+# clusters = hierarchy.fcluster(dist_linkage, 0.3, criterion='distance')
+# unique_clusters = list(np.unique(clusters))
+# print(f'Clusters: {unique_clusters}')
 
-# Plot the results.
-fig, ax = plt.subplots(figsize=(16, 12))
-sns.scatterplot(x=embeddings[:, 0],
-                y=embeddings[:, 1],
-                hue=clusters,
-                style=clusters,
-                size=clusters*100,
-                palette='hsv',
-                legend=False,
-                ax=ax)
-fig.tight_layout()
+# # Plot the results.
+# fig, ax = plt.subplots(figsize=(16, 12))
+# sns.scatterplot(x=embeddings[:, 0],
+#                 y=embeddings[:, 1],
+#                 hue=clusters,
+#                 style=clusters,
+#                 size=clusters*100,
+#                 palette='hsv',
+#                 legend=False,
+#                 ax=ax)
+# fig.tight_layout()
 
 # %%
 # Show the correlation in these clusters.
-for cluster in unique_clusters:
-    features_in_cluster = Xtrain_df.columns[clusters == cluster]
-    X_in_cluster = Xtrain_df[features_in_cluster]
-    corr_in_cluster = X_in_cluster.corr('spearman')
-    corrs = 1 - squareform(1 - np.abs(corr_in_cluster))
-    if len(features_in_cluster) > 1:
-        print(f'{cluster=}, nb_features={len(features_in_cluster)}, '
-              f'min={np.min(corrs)}, '
-              f'max={np.max(corrs)}, mean={np.mean(corrs)}')
-    else:
-        print(f'{cluster=} has only 1 member.')
-
+# for cluster in unique_clusters:
+#     features_in_cluster = Xtrain_df.columns[clusters == cluster]
+#     X_in_cluster = Xtrain_df[features_in_cluster]
+#     corr_in_cluster = X_in_cluster.corr('spearman')
+#     corrs = 1 - squareform(1 - np.abs(corr_in_cluster))
+#     if len(features_in_cluster) > 1:
+#         print(f'{cluster=}, nb_features={len(features_in_cluster)}, '
+#               f'min={np.min(corrs)}, '
+#               f'max={np.max(corrs)}, mean={np.mean(corrs)}')
+#     else:
+#         print(f'{cluster=} has only 1 member.')
 
 # %% [markdown]
 # Now, we can use these steps to extract the uncorrelated features.
@@ -235,14 +234,17 @@ class NNClassifier(nn.Module):
             nn.Dropout(),
             nn.LayerNorm(512),
 
+            # was 64
             nn.Linear(512, 64),
             # nn.Tanh(),
         )
 
         self.output = nn.Sequential(
             # nn.Dropout(),
+            # was 64
             nn.LayerNorm(64),
             # nn.Dropout(),
+            # was 64
             nn.Linear(64, 1),
         )
 
@@ -677,6 +679,7 @@ def cross_validations(
         n_folds: int = 10,
         repeats_per_fold: int = 1,
         keep_best_in_fold_method: str = 'f1_test',
+        only_folds: list[int] | None = None,
         **kwargs):
     assert keep_best_in_fold_method in ['f1_test', 'opt_log_loss_test']
 
@@ -685,6 +688,10 @@ def cross_validations(
 
     kfolds = StratifiedKFold(n_splits=n_folds)
     for fold, (train_idx, test_idx) in enumerate(kfolds.split(X, y)):
+        if only_folds is not None and (fold + 1) not in only_folds:
+            print(f'SKIPPED fold #{fold + 1}')
+            continue
+
         best_model_metric = (0.0
                              if keep_best_in_fold_method == 'f1_test'
                              else np.inf)
@@ -734,14 +741,20 @@ cv_results, models = cross_validations(
     y=y,
     preprocessing=clone(preprocessing),
     keep_best_in_fold_method=keep_best_in_fold_method,
+    only_folds=[6, 7] if not kaggle_submission else None,
     n_folds=10,
-    repeats_per_fold=2,
+    repeats_per_fold=10 if kaggle_submission else 10,
     device='cuda' if torch.cuda.is_available() else 'cpu',
     epochs=2000,
-    correlation_threshold=0.3,
+    # correlation_threshold=0.3,
+    correlation_threshold=0.2,
+    # correlation_threshold=0.25,
     lr=1e-4,
     early_stopping_patience=100,
-    weight_decay=1e-2,
+    # weight_decay=1e-2,
+    weight_decay=1.0,
+    # weight_decay=5.0,
+    # regularization_weight=1.0,
     regularization_weight=1.0,
     train_noise=0.01)
 
@@ -793,11 +806,11 @@ cv_results_optimal_log_loss_test.describe()
 
 # %%
 # Save models for later use.
-date = datetime.now().strftime('%Y%m%d_%H_%M')
-prefix = '11.1e'
-output_fn = f'{date}_{prefix}.model'
-with open(output_fn, 'wb') as out:
-    pickle.dump(models, out, protocol=pickle.DEFAULT_PROTOCOL)
+# date = datetime.now().strftime('%Y%m%d_%H_%M')
+# prefix = '11.1e'
+# output_fn = f'{date}_{prefix}.model'
+# with open(output_fn, 'wb') as out:
+#     pickle.dump(models, out, protocol=pickle.DEFAULT_PROTOCOL)
 
 # %% [markdown]
 # ### Discussions
