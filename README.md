@@ -32,6 +32,7 @@ logit_i = a_0 + \mathbf{a^1} * \mathbf{x}_i + \mathbf{a^2} * \mathbf{x_i^{intera
 $$
 
 $$prob_i = 0.5*guess + (1 - guess)*e^{logit_i}$$
+
 $$y_i \sim Bernoulli(prob_i)$$
 
 The Bayesian model will produce all possible predictions for $y$.
