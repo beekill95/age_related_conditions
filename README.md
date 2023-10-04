@@ -63,16 +63,16 @@ Now, take the derivative of the above wrt $p^{(j)}$,
 we have:
 
 $$
-\frac{\partial \mathcal{L}(p^{(j)})}{\partial p^{(j)}} = -\frac{C_j}{p^{(j)}} + \frac{C^{-1}_j}{1 - p^{(j)}}
+\frac{\partial \mathcal{L}(p^{(j)})}{\partial p^{(j)}} = -\frac{C_j}{p^{(j)}} + \frac{C^-_j}{1 - p^{(j)}}
 $$
 
 where $C_j$ is $\sum_i \frac{y_i^{(j)}}{\sum_j y_i^{(j)}}$,
-and $C_j^{-1}$ is $\sum_i \frac{1 - y_i^{(j)}}{\sum_j (1 - y_i^{(j)})}$
+and $C_j^-$ is $\sum_i \frac{1 - y_i^{(j)}}{\sum_j (1 - y_i^{(j)})}$
 
 The prediction that optimizes the log loss satisfies:
 
 $$
-p^{(j)} = \frac{C_j}{C_j + C_j^{-1}}
+p^{(j)} = \frac{C_j}{C_j + C_j^-}
 $$
 
 ### Neural Network Models
